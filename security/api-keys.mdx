@@ -1,0 +1,117 @@
+---
+title: "API keys"
+description: "Create and manage API keys so scripts, container tools, and users who sign in with OpenID can authenticate."
+icon: "key"
+---
+
+An API key is a long-lived credential that belongs to a user. Use it as the **password** with Basic authentication. API keys are the way to authenticate Docker, Podman, containerd, kubelet, and scripts when users normally sign in with [OpenID Connect](/security/openid), because those tools can't complete a browser login.
+
+## Enable API keys
+
+```json
+"http": {
+  "auth": {
+    "apikey": true
+  }
+}
+```
+
+<ParamField path="http.auth.apikey" type="boolean" default="false">
+  Turn on API key authentication and the key management endpoints.
+</ParamField>
+
+<Info>
+  If you configure `http.auth.openid`, zot enables API keys automatically. The old `extensions.apikey` setting is ignored. zot logs a warning if it's present.
+</Info>
+
+zot stores only a hash of each key in its metadata database, plus the key's details. API keys use the prefix `zak_`.
+
+## Create a key
+
+<Tabs>
+  <Tab title="Web UI">
+    Sign in to the zot [web UI](/use/web-ui) and create an API key from the user settings. Copy it right away. zot shows the key only once.
+  </Tab>
+  <Tab title="API">
+    Send an authenticated `POST` request to `/zot/auth/apikey`:
+
+    ```bash
+    curl -u <username>:<password> -X POST https://zot.example.com/zot/auth/apikey \
+      -H 'Content-Type: application/json' \
+      -d '{"label": "ci-pipeline", "expirationDate": "2027-01-31T00:00:00Z"}'
+    ```
+
+    zot returns `201 Created` with the key in `apiKey`:
+
+    ```json
+    {
+      "apiKey": "zak_<key>",
+      "uuid": "<key-id>",
+      "label": "ci-pipeline",
+      "scopes": [],
+      "createdAt": "2026-10-20T10:00:00-07:00",
+      "expirationDate": "2027-01-31T00:00:00Z",
+      "isExpired": false,
+      "generatedBy": "manual",
+      "creatorUa": "curl/8.7.1"
+    }
+    ```
+  </Tab>
+</Tabs>
+
+<ParamField body="label" type="string">
+  A name that helps you recognize the key.
+</ParamField>
+<ParamField body="scopes" type="string[]">
+  Scope labels stored with the key as metadata. Repository access is always decided by [access control](/security/access-control), not by these values.
+</ParamField>
+<ParamField body="expirationDate" type="string (RFC 3339)">
+  When the key expires, for example `2027-01-31T00:00:00Z`. It must be in the future. If you omit it, the key never expires.
+</ParamField>
+
+<Warning>
+  Treat an API key like a password. Anyone who has it can act as you. Store it in a secret manager, give each tool its own key, and set an expiration date.
+</Warning>
+
+## Use a key
+
+Use your zot username and the key as the password:
+
+<CodeGroup>
+  ```bash Docker
+  echo "<api-key>" | docker login zot.example.com -u <username> --password-stdin
+  ```
+
+  ```bash Podman
+  echo "<api-key>" | podman login zot.example.com -u <username> --password-stdin
+  ```
+
+  ```bash curl
+  curl -u <username>:<api-key> https://zot.example.com/v2/_catalog
+  ```
+</CodeGroup>
+
+The username must match the user who owns the key. Requests authenticate as that user, with the user's groups, so [access control](/security/access-control) policies apply as usual. Expired and revoked keys are rejected.
+
+If you configure a Bearer challenge (`auth.bearer.realm` and `service`), OCI clients can also exchange an API key for a short-lived bearer token at `/zot/auth/token`. See [Combining methods](/security/authentication#combining-methods).
+
+## List and revoke keys
+
+<CodeGroup>
+  ```bash List
+  curl -u <username>:<api-key> https://zot.example.com/zot/auth/apikey
+  ```
+
+  ```bash Revoke
+  curl -u <username>:<api-key> -X DELETE \
+    "https://zot.example.com/zot/auth/apikey?id=<key-id>"
+  ```
+</CodeGroup>
+
+The list returns your keys' details (`uuid`, `label`, `createdAt`, `expirationDate`, `isExpired`, `lastUsed`) but never the key itself. Revoke a key with its `uuid`.
+
+## Related
+
+- [OpenID Connect](/security/openid)
+- [Docker client](/clients/docker)
+- [Authentication overview](/security/authentication)

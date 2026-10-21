@@ -1,0 +1,53 @@
+---
+title: "Google Cloud Storage"
+description: "Store zot images in a Google Cloud Storage bucket."
+icon: "cloud"
+---
+
+Configure a Google Cloud Storage (GCS) bucket with the `storageDriver` attribute in the `storage` section.
+
+```json
+{
+  "storage": {
+    "rootDirectory": "/tmp/zot",
+    "storageDriver": {
+      "name": "gcs",
+      "bucket": "zot-storage",
+      "rootdirectory": "/zot",
+      "keyfile": "/path/to/gcs-credentials.json"
+    }
+  }
+}
+```
+
+With deduplication on, remote storage needs a [cache driver](/configuration/storage/cache-drivers). GCS is typically paired with Redis.
+
+## Driver settings
+
+<ParamField path="name" type="string" required>
+  `gcs`.
+</ParamField>
+<ParamField path="bucket" type="string" required>
+  The GCS bucket that stores registry data.
+</ParamField>
+<ParamField path="rootdirectory" type="string" default="/zot">
+  Root directory in the bucket that zot writes to. zot uses `/zot` if you leave it unset, empty, or `/`.
+</ParamField>
+<ParamField path="keyfile" type="string">
+  Path to a service account JSON key file. Omit it to use [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials), for example workload identity or `GOOGLE_APPLICATION_CREDENTIALS`.
+</ParamField>
+<ParamField path="credentials" type="object">
+  Inline service account credentials as a JSON object. Used only when `keyfile` isn't set. Prefer `keyfile` or Application Default Credentials so that secrets stay out of the configuration file.
+</ParamField>
+<ParamField path="chunksize" type="integer">
+  Upload chunk size in bytes. It must be a multiple of the driver's minimum chunk size.
+</ParamField>
+<ParamField path="useragent" type="string">
+  User-Agent header for GCS API requests.
+</ParamField>
+
+For more, see the [distribution GCS driver documentation](https://distribution.github.io/distribution/storage-drivers/gcs/).
+
+<Tip>
+  GCS supports [redirecting blob pulls to signed backend URLs](/configuration/storage/s3#redirect-blob-pulls-to-backend-urls) with `redirectBlobURL`.
+</Tip>

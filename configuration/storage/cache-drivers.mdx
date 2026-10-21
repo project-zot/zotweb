@@ -1,0 +1,260 @@
+---
+title: "Cache drivers"
+description: "Choose and configure the database that stores deduplicated-blob information: BoltDB, DynamoDB, or Redis."
+icon: "layer-group"
+---
+
+A cache driver stores information about duplicate blobs when `dedupe` is on. When `remoteCache` is `true`, the same remote database also holds registry metadata, such as the data used by the search extension.
+
+| Driver | Works with | Multiple zot instances | Notes |
+|---|---|---|---|
+| [BoltDB](#boltdb) | Local storage | No | The default. A local file in the root directory. |
+| [DynamoDB](#dynamodb) | S3 storage | Yes | Needs access to AWS. |
+| [Redis](#redis) | Local and remote storage | Yes for remote storage. Single instance only for local storage. | Alternative to DynamoDB and BoltDB. |
+
+<Note>
+  If `dedupe` is `true`, a `storageDriver` is configured, and you don't set `remoteCache`, it defaults to `true`. You then need a `cacheDriver`, or zot rejects the configuration. A `cacheDriver` with `remoteCache: false` is ignored, with a warning, and zot uses a local database.
+</Note>
+
+## BoltDB
+
+If you don't specify a cache driver, zot uses [BoltDB](https://dbdb.io/db/boltdb). The database is a file in zot's root directory, or in the subpath's root directory.
+
+```json
+{
+  "storage": {
+    "rootDirectory": "/tmp/zot",
+    "dedupe": true
+  }
+}
+```
+
+Here the database is at `/tmp/zot/cache.db`.
+
+<Warning>
+  BoltDB doesn't allow concurrent writers, so you can't run multiple zot instances or replicas against a BoltDB configuration.
+</Warning>
+
+## DynamoDB
+
+To use [DynamoDB](https://aws.amazon.com/dynamodb/), set all of these:
+
+- `dedupe` is `true`.
+- `remoteCache` is `true`.
+- `cacheDriver` is configured as shown.
+
+```json
+{
+  "storage": {
+    "rootDirectory": "/tmp/zot",
+    "dedupe": true,
+    "remoteCache": true,
+    "cacheDriver": {
+      "name": "dynamodb",
+      "endpoint": "http://localhost:4566",
+      "region": "us-east-2",
+      "cacheTablename": "ZotBlobTable"
+    }
+  }
+}
+```
+
+<ParamField path="name" type="string" required>
+  `dynamodb`.
+</ParamField>
+<ParamField path="endpoint" type="string">
+  AWS endpoint. Use a local endpoint such as LocalStack for testing.
+</ParamField>
+<ParamField path="region" type="string">
+  AWS region.
+</ParamField>
+<ParamField path="cacheTablename" type="string" required>
+  Table that stores deduplicated blobs. Required.
+</ParamField>
+
+The AWS Go SDK also loads configuration and credentials from environment variables and the shared credentials and configuration files.
+
+### Extra tables for search and authentication
+
+With the search extension or API keys enabled, zot also stores metadata in DynamoDB, so you need more table names:
+
+```json
+"cacheDriver": {
+  "name": "dynamodb",
+  "endpoint": "http://localhost:4566",
+  "region": "us-east-2",
+  "cacheTablename": "ZotBlobTable",
+  "userDataTablename": "ZotUserDataTable",
+  "apiKeyTablename": "ZotApiKeyTable",
+  "repoMetaTablename": "ZotRepoMetadataTable",
+  "imageMetaTablename": "ZotImageMetaTable",
+  "repoBlobsInfoTablename": "ZotRepoBlobsInfoTable",
+  "versionTablename": "ZotVersion"
+}
+```
+
+`userDataTablename` and `apiKeyTablename` are used by authentication. The rest are used by the search extension.
+
+### DynamoDB permissions
+
+zot needs this policy to cache blobs. Replace `<DYNAMODB_TABLE>` with the value of `cacheTablename`. For example, with `ZotBlobTable` the resource is `arn:aws:dynamodb:*:*:table/ZotBlobTable`.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:CreateTable",
+        "dynamodb:DescribeTable",
+        "dynamodb:DeleteTable",
+        "dynamodb:Scan",
+        "dynamodb:BatchGetItem",
+        "dynamodb:GetItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem"
+      ],
+      "Resource": "arn:aws:dynamodb:*:*:table/<DYNAMODB_TABLE>"
+    }
+  ]
+}
+```
+
+<Note>
+  `dynamodb:DeleteTable` is used only when running zot's tests. You shouldn't need it in production. For the extra metadata tables, grant the same permissions on those tables. See the [AWS documentation](https://docs.aws.amazon.com/dynamodb/).
+</Note>
+
+## Redis
+
+[Redis](https://redis.io/) is an alternative to BoltDB, which can't be shared by multiple zot instances, and to DynamoDB, which needs AWS. Redis works with local and remote storage. With local storage, run only a single zot instance.
+
+To use Redis, set `remoteCache` to `true` and configure `cacheDriver`:
+
+```json
+{
+  "storage": {
+    "rootDirectory": "/tmp/zot",
+    "remoteCache": true,
+    "cacheDriver": {
+      "name": "redis",
+      "url": "redis://localhost:6379",
+      "keyprefix": "zot"
+    }
+  }
+}
+```
+
+<ParamField path="name" type="string" required>
+  `redis`.
+</ParamField>
+<ParamField path="url" type="string">
+  Connection URL. It can carry query parameters for various settings, and works for single instances and clusters. If you omit `url`, zot reads the other parameters from `cacheDriver`. See the go-redis [options](https://github.com/redis/go-redis/blob/v9.7.0/options.go#L247) and [cluster](https://github.com/redis/go-redis/blob/v9.7.0/osscluster.go#L144) parsing.
+</ParamField>
+<ParamField path="keyprefix" type="string" default="zot">
+  String prepended to every Redis key that this instance creates.
+</ParamField>
+
+### Share a Redis database
+
+- Several zot instances that share the same Redis database **and** the same storage should use the same `keyprefix`.
+- Several instances that share a Redis database but have different storage locations with different images should use different `keyprefix` values.
+
+### Redis cluster
+
+```json
+{
+  "storage": {
+    "rootDirectory": "/tmp/zot",
+    "remoteCache": true,
+    "cacheDriver": {
+      "name": "redis",
+      "url": "redis://<user>:<password>@host1:6379?addr=host2:6379&addr=host3:6379",
+      "keyprefix": "zot"
+    }
+  }
+}
+```
+
+### Redis Sentinel and individual parameters
+
+The URL parser doesn't support Redis Sentinel. Instead, leave out `url` and pass each parameter as a key in `cacheDriver`. The keys match the attributes that would otherwise go in the URL. For Sentinel, also set `master_name`. See the go-redis [universal options](https://github.com/redis/go-redis/blob/v9.7.0/universal.go#L240).
+
+<Accordion title="All Redis parameters">
+  ```json
+  {
+    "storage": {
+      "rootDirectory": "/tmp/zot",
+      "remoteCache": true,
+      "cacheDriver": {
+        "name": "redis",
+        "keyprefix": "zot",
+        "addr": ["host1:6379", "host2:6379", "host3:6379"],
+        "client_name": "client",
+        "db": 1,
+        "protocol": 3,
+        "username": "user1",
+        "password": "<password>",
+        "sentinel_username": "user2",
+        "sentinel_password": "<sentinel-password>",
+        "max_retries": 3,
+        "min_retry_backoff": "5s",
+        "max_retry_backoff": "5s",
+        "dial_timeout": "5s",
+        "read_timeout": "5s",
+        "write_timeout": "5s",
+        "context_timeout_enabled": false,
+        "pool_fifo": false,
+        "pool_size": 3,
+        "pool_timeout": "5s",
+        "min_idle_conns": 1,
+        "max_idle_conns": 3,
+        "max_active_conns": 3,
+        "conn_max_idle_time": "5s",
+        "conn_max_lifetime": "5s",
+        "max_redirects": 3,
+        "read_only": false,
+        "route_by_latency": false,
+        "route_randomly": false,
+        "master_name": "zotmeta",
+        "disable_identity": false,
+        "identity_suffix": "zotmeta",
+        "unstable_resp3": false
+      }
+    }
+  }
+  ```
+
+  <Warning>
+    This lists every option for reference. Don't set them all together: some options for single instance, cluster, and Sentinel setups exclude each other.
+  </Warning>
+</Accordion>
+
+## Remote storage subpaths
+
+As with [local storage](/configuration/storage/local#serve-multiple-storage-paths), you can serve several remote storage locations with `subPaths`. Each subpath can use a different storage driver and its own cache driver.
+
+```json
+"subPaths": {
+  "/a": {
+    "rootDirectory": "/zot-a",
+    "storageDriver": {
+      "name": "s3",
+      "region": "us-east-2",
+      "bucket": "zot-storage",
+      "secure": true,
+      "skipverify": false
+    }
+  },
+  "/b": {
+    "rootDirectory": "/zot-b",
+    "storageDriver": {
+      "name": "s3",
+      "region": "us-east-2",
+      "bucket": "zot-storage-b"
+    }
+  }
+}
+```
+
+Repository paths `/a` and `/b` are both exposed to clients, and their content can live on completely different services, locations, or filesystems with no difference in the user experience. This helps when you serve existing OCI images from different backends, or when storage can only grow by adding backing stores.

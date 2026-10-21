@@ -1,0 +1,149 @@
+---
+title: "Storage overview"
+description: "Storage model, features, backends, and the settings shared by every zot storage configuration."
+icon: "database"
+---
+
+zot provides OCI standards-based, vendor-agnostic image storage with local and remote file storage, inline deduplication and garbage collection, and background data scrubbing.
+
+## Storage model
+
+Two principles drive how zot handles data:
+
+- Data and APIs on the wire conform to the OCI Distribution Specification.
+- Data on disk conforms to the OCI Image Layout Specification.
+
+As a result, any Distribution Specification client can read from or write to zot, and the storage is simply an OCI image layout. With those two specifications in hand, you can follow the whole data flow.
+
+<Note>
+  zot doesn't implement, support, or require any vendor-specific protocol, including Docker's.
+</Note>
+
+### Host an existing OCI image layout
+
+Because zot uses the OCI image layout, it can serve any directory that holds a valid layout, even one created elsewhere. This suits workflows where images are built, stored, and transferred independently and then served over the network.
+
+## Choose a backend
+
+| Backend | `storageDriver.name` | Use when | Dedupe cache | Details |
+|---|---|---|---|---|
+| Local filesystem, including mounted NFS or FUSE | none | A single server or embedded device, or a mounted network filesystem | BoltDB by default (single instance only), or Redis | [Local storage](/configuration/storage/local) |
+| Amazon S3 or S3-compatible | `s3` | Cloud deployments or object storage such as MinIO | DynamoDB or Redis | [Amazon S3](/configuration/storage/s3) |
+| Google Cloud Storage | `gcs` | Deployments on Google Cloud | Redis | [Google Cloud Storage](/configuration/storage/gcs) |
+| Azure Blob Storage | `azure` | Deployments on Azure | Redis | [Azure Blob Storage](/configuration/storage/azure) |
+
+You can combine backends in one registry with [subpaths](/configuration/storage/local#serve-multiple-storage-paths). For dedupe cache options, see [Cache drivers](/configuration/storage/cache-drivers).
+
+<Note>
+  Remote filesystems that are mounted locally, such as NFS or FUSE, are treated as local filesystems.
+</Note>
+
+## Storage features
+
+### Commit
+
+Most filesystems buffer writes in RAM and flush them after a delay. That improves performance but uses more memory. On embedded devices such as a Raspberry Pi, where RAM is scarce, you may want to flush more often. Set `commit` to `true` to commit writes to disk immediately. It's off by default.
+
+### Deduplication
+
+Deduplication keeps a single copy of identical content on disk, while many manifests reference it. It's on by default and also works with supported cloud backends.
+
+At startup, zot enforces the `dedupe` setting on existing storage:
+
+- `true`: zot deduplicates all blobs it finds, local and remote.
+- `false`: zot restores cloud storage blobs to their original state. Local storage that uses hard links needs no restore.
+
+<Note>
+  Local deduplication needs a filesystem with hard-link support.
+</Note>
+
+### Garbage collection
+
+When you delete an image manifest, its blobs can be purged to free space. Distribution Specification APIs aren't transactional across blobs and manifests, so zot's garbage collection is careful not to leave storage inconsistent. It's inline, so you don't need to take the registry offline. See [Retention and garbage collection](/operations/retention-gc) for how to configure it.
+
+### Scrub
+
+The `scrub` extension periodically recomputes hashes on blobs to catch bit rot and report it early. See [Enable extensions](/configuration/extensions).
+
+## Storage failure handling
+
+Beginning with zot v2.1.22, the local, S3, GCS, and Azure drivers distinguish three outcomes:
+
+| Outcome | API response |
+|---|---|
+| Missing content | `404` |
+| Transient backend failure | `503 Service Unavailable` |
+| Permanent backend failure | `500 Internal Server Error` |
+
+Clients should retry a `503` instead of treating it as proof that an image was deleted. Check the zot and backend logs before retrying a `500`, because it can point to a persistent configuration, permission, or data error.
+
+Background storage operations also **fail closed**. If garbage collection, deduplication, scrub, or a storage walk can't get a complete listing or confirm whether content exists, that operation stops instead of treating the unknown result as missing content. Scheduled operations can retry on their next cycle once the backend recovers. This keeps manifest pruning and dedupe-origin repair from acting on a partial view of storage.
+
+## Storage settings
+
+Configure storage with the `storage` section of the configuration file:
+
+```json
+"storage": {
+  "rootDirectory": "/tmp/zot",
+  "commit": true,
+  "dedupe": true,
+  "hydrateBlobOnRead": false,
+  "gc": true,
+  "gcDelay": "1h",
+  "gcInterval": "24h"
+}
+```
+
+<ParamField path="rootDirectory" type="string" required>
+  Location of stored images on the server filesystem. With remote storage, it also holds local state such as the BoltDB cache.
+</ParamField>
+<ParamField path="commit" type="boolean" default="false">
+  Write data to disk immediately instead of letting the operating system flush it later. This prevents data loss but reduces performance.
+</ParamField>
+<ParamField path="dedupe" type="boolean" default="true">
+  Inline deduplication of layers and blobs shared by multiple images. Local storage needs hard-link support.
+</ParamField>
+<ParamField path="remoteCache" type="boolean">
+  Use a remote database (DynamoDB or Redis) for the dedupe cache and metadata instead of BoltDB. If you omit it, it defaults to `true` when `dedupe` is `true` and a `storageDriver` is configured. See [Cache drivers](/configuration/storage/cache-drivers).
+</ParamField>
+<ParamField path="cacheDriver" type="object">
+  Which database stores duplicate-blob information when deduplication is on. See [Cache drivers](/configuration/storage/cache-drivers).
+</ParamField>
+<ParamField path="hydrateBlobOnRead" type="boolean" default="false">
+  When deduplication is on, create a repository-local hard link when a blob read finds the digest only in the global dedupe cache. By default, blob `HEAD` and `GET` requests return `404` unless the blob already exists in the requested repository. Available at the top level and per subpath. See [Hydrate deduplicated blobs on read](#hydrate-deduplicated-blobs-on-read).
+</ParamField>
+<ParamField path="gc" type="boolean" default="true">
+  Garbage collection of orphaned blobs after deleting an image by tag or digest. Set to `false` to disable.
+</ParamField>
+<ParamField path="gcDelay" type="duration" default="1h">
+  Run garbage collection once after this delay. Requires `gc` to be `true`.
+</ParamField>
+<ParamField path="gcInterval" type="duration" default="1h">
+  Interval for periodic garbage collection. Requires `gc` to be `true`.
+</ParamField>
+<ParamField path="gcTimeWindow" type="string">
+  Daily UTC `HH:MM-HH:MM` window in which periodic GC sweeps may start. See [Retention and garbage collection](/operations/retention-gc).
+</ParamField>
+<ParamField path="maxRepos" type="integer" default="0">
+  Maximum number of repositories. When the limit is reached, pushes that create a new repository are rejected with HTTP `429`, while pushes to existing repositories keep working. `0` or omitted disables the limit.
+</ParamField>
+<ParamField path="storageDriver" type="object">
+  Settings for remote storage. See [Amazon S3](/configuration/storage/s3), [Google Cloud Storage](/configuration/storage/gcs), and [Azure Blob Storage](/configuration/storage/azure).
+</ParamField>
+<ParamField path="redirectBlobURL" type="boolean" default="false">
+  Redirect blob pulls to signed backend URLs. Remote storage only. See [Amazon S3](/configuration/storage/s3#redirect-blob-pulls-to-backend-urls).
+</ParamField>
+<ParamField path="subPaths" type="object">
+  Additional storage locations, each with its own repository path and settings. See [Local storage](/configuration/storage/local#serve-multiple-storage-paths).
+</ParamField>
+
+### Hydrate deduplicated blobs on read
+
+Beginning with zot v2.1.21, blob reads are repository-local by default. Even if the same digest exists in another repository and in the dedupe cache, a `HEAD` or `GET` returns `404` until the blob is mounted or uploaded into the requested repository. This preserves repository boundaries and avoids changing storage during a read.
+
+Set `hydrateBlobOnRead` to `true` to keep the earlier behavior, where a successful read creates a repository-local hard link from the dedupe cache. It affects full and ranged reads. For new integrations, prefer explicit cross-repository blob mounts.
+
+<Info>
+  Garbage collection settings are covered in [Retention and garbage collection](/operations/retention-gc).
+</Info>

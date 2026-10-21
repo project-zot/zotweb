@@ -1,0 +1,92 @@
+---
+title: "Security posture"
+description: "Build-time and runtime hardening in zot: PIE builds, minimal builds, non-root operation, and more."
+icon: "shield"
+---
+
+The zot project takes a defense-in-depth approach to security. Hardening and product features sometimes conflict, so zot gives you flexibility at both build time and deployment time.
+
+- Build-time hardening such as PIE-mode builds
+- A minimal build for a smaller attack surface
+- Open Source Security Foundation best practices for CI/CD
+- Non-root deployment
+- Authentication and authorization options
+
+## Build-time hardening
+
+### PIE build mode
+
+The zot binary is built in [PIE](https://en.wikipedia.org/wiki/Position-independent_code) mode to take advantage of [ASLR](https://en.wikipedia.org/wiki/Address_space_layout_randomization) in modern operating systems such as [Linux](https://lwn.net/Articles/569635/). zot is meant to run for a long time without restarts. PIE still prevents attackers from building a generic attack that depends on predictable memory addresses *across* many zot deployments.
+
+### Conditional builds
+
+zot is organized as a *core* [Distribution Specification](https://github.com/opencontainers/distribution-spec) implementation plus add-on features called [extensions](/concepts/extensions). This limits the library dependencies in the binary and so the attack surface.
+
+zot releases two flavors:
+
+- **Minimal:** a minimal Distribution Specification conformant registry. It's for the security-minded, with the fewest dependencies and libraries.
+- **Full:** the minimal build **and** all extensions. It's for the functionality-minded, and its attack surface is potentially broader.
+
+You can build something in between. The `Makefile` lets you pick extensions. For example, this produces a binary with only the `search` extension:
+
+```bash
+make EXTENSIONS=search binary
+```
+
+Valid extension names are `debug`, `imagetrust`, `lint`, `metrics`, `mgmt`, `profile`, `scrub`, `search`, `sync`, `ui`, `userprefs`, and `events`.
+
+### CI/CD pipeline
+
+The zot pipeline aims to align with the Open Source Security Foundation (OSSF) [best practices](https://bestpractices.coreinfrastructure.org/en).
+
+- **Code reviews:** all code submissions are open. The code owners must review every pull request, and extra workflows watch for unreviewed commits.
+- **CI/CD checks:** every pull request must pass unit, functional, and integration tests, code quality and style checks, and performance regression checks. All binaries are also scanned for known vulnerabilities.
+
+## Runtime hardening
+
+You can take these steps to harden a deployment.
+
+### Run as an unprivileged process
+
+zot doesn't need `root`. Create a separate user and group for the zot process. See [Install on Linux](/install/linux).
+
+### Enable authentication
+
+All interaction with zot is over HTTP APIs. zot supports `htpasswd` local authentication, LDAP, mutual TLS, and token-based authentication. Enable a mechanism that suits your deployment so unauthorized users can't reach the registry. See [Authentication](/security/authentication).
+
+### Control access
+
+After authentication, you can allow or deny actions per user and repository. See [Access control](/security/access-control).
+
+### Configure HTTP timeouts
+
+zot has configurable read and write timeouts for the API server. They keep slow or stalled connections from using server resources forever.
+
+<ParamField path="http.readTimeout" type="duration" default="60s">
+  Maximum time to read an entire request, including the body.
+</ParamField>
+<ParamField path="http.writeTimeout" type="duration" default="60s">
+  Maximum time before a response write times out.
+</ParamField>
+
+```json
+{
+  "http": {
+    "readTimeout": "60s",
+    "writeTimeout": "60s"
+  }
+}
+```
+
+- Use larger values for big image pushes and pulls over slow networks.
+- A value of `0` disables the timeout. Infinite timeouts increase exposure to stalled or abusive connections.
+
+The `zxp` metrics exporter has its own `readTimeout` and `writeTimeout` in the `Exporter` section of its configuration. They default to `30s`. See [Monitoring](/operations/monitoring).
+
+## Vulnerability scans
+
+You can also scan stored images for known vulnerabilities. See [CVE scanning](/security/cve-scanning).
+
+## Reporting security issues
+
+No software is perfect. If you find a security bug, follow the [security policy](https://github.com/project-zot/zot/blob/main/SECURITY.md) to report it responsibly. Don't open a public issue.
