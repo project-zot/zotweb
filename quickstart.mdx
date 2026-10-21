@@ -1,47 +1,91 @@
 ---
 title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+description: "Run zot, push an image, and pull it back in five minutes."
+icon: "bolt"
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
+This guide runs zot in a container on your machine, pushes an image to it, and opens the web UI. It doesn't configure authentication or TLS, so use it for local testing only.
 
 ## Prerequisites
 
-Before you begin, you must have:
+- [Docker](https://docs.docker.com/get-docker/) or [Podman](https://podman.io/)
+- [skopeo](https://github.com/containers/skopeo) to copy images. You can also use `regctl` or `oras`. See [Push and pull images](/use/push-pull).
 
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+## Run zot
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+  <Step title="Start the registry">
+    <CodeGroup>
+      ```bash Docker
+      docker run -d --name zot -p 5000:5000 ghcr.io/project-zot/zot:latest
+      ```
 
+      ```bash Podman
+      podman run -d --name zot -p 5000:5000 ghcr.io/project-zot/zot:latest
+      ```
+    </CodeGroup>
+
+    The container image starts zot with a default configuration. It listens on port `5000`, stores data in `/var/lib/registry`, and enables the web UI, search, and management API.
+  </Step>
+
+  <Step title="Check that it's running">
     ```bash
-    npm install your-package
+    curl http://localhost:5000/v2/_catalog
+    ```
+
+    A new registry has no repositories:
+
+    ```json
+    {"repositories":[]}
     ```
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+
+  <Step title="Push an image">
+    Copy the `busybox` image from Docker Hub to your registry:
 
     ```bash
-    your-cli init
+    skopeo copy --dest-tls-verify=false --multi-arch=all \
+      docker://busybox:latest \
+      docker://localhost:5000/busybox:latest
     ```
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
 
+  <Step title="Pull the image">
     ```bash
-    your-cli start
+    docker pull localhost:5000/busybox:latest
     ```
+
+    Docker treats `localhost` as a trusted registry, so no TLS configuration is needed here.
+  </Step>
+
+  <Step title="Browse in the web UI">
+    Open [http://localhost:5000](http://localhost:5000) in your browser and search for `busybox`.
   </Step>
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+## Clean up
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>
+```bash
+docker rm -f zot
+```
+
+<Warning>
+  This setup has no authentication and no TLS. Before you expose zot to a network, follow [Authentication](/security/authentication) and [HTTP and TLS](/configuration/http), and review the [Production checklist](/operations/production-checklist).
+</Warning>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Install for real" icon="download" href="/install/choose-method">
+    Run zot as a service or on Kubernetes.
+  </Card>
+  <Card title="Configure zot" icon="sliders" href="/configuration/overview">
+    Control storage, extensions, and behavior with one config file.
+  </Card>
+  <Card title="Use the zli CLI" icon="square-terminal" href="/use/zli">
+    Query images and CVEs from the command line.
+  </Card>
+  <Card title="Set up Docker" icon="docker" href="/clients/docker">
+    Docker client quirks and how to configure around them.
+  </Card>
+</CardGroup>

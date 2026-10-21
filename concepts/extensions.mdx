@@ -1,0 +1,55 @@
+---
+title: "Extensions"
+description: "Optional zot features that go beyond the OCI Distribution Specification."
+icon: "puzzle-piece"
+---
+
+Extensions provide registry features that aren't part of the OCI Distribution Specification.
+
+The Distribution Specification lets a registry add [extensions](https://github.com/opencontainers/distribution-spec/tree/main/extensions), which are new APIs developed outside the core specs. Where applicable, clients can discover extensions dynamically through the specification's extensions mechanism.
+
+<Warning>
+  Extensions are available only in the **full** zot image. They're excluded from the minimal image. See [Releases and images](/install/releases).
+</Warning>
+
+For how to enable and configure each extension, see [Enable extensions](/configuration/extensions).
+
+## Extensions in zot
+
+<Note>
+  Of these, only `search`, `trust`, and `userprefs` are operable by end users through HTTP APIs. Only these are [discoverable](https://github.com/opencontainers/distribution-spec/blob/main/extensions/_oci.md#module-discover) with the OCI extensions mechanism.
+</Note>
+
+<AccordionGroup>
+  <Accordion title="Search" defaultOpen>
+    A registry is essentially a graph of blobs, so useful queries traverse that graph. You use the `search` extension through a GraphQL endpoint, and the schema is published with every release. Example questions it answers:
+
+    - Does an image exist?
+    - What is its size?
+    - Does an image depend on this image through its layers?
+    - What vulnerabilities exist in an image or its dependencies?
+
+    See [Search with GraphQL](/use/search-graphql).
+  </Accordion>
+  <Accordion title="Sync">
+    Deploy a local mirror of an upstream registry with download policies such as on-demand and periodic. Sync avoids overwhelming an upstream instance, and it helps when upstream access is rate-limited. `docker.io` is supported as an upstream. See [Mirroring and sync](/operations/mirroring).
+  </Accordion>
+  <Accordion title="Lint">
+    Enforces policies on uploaded images or their metadata. Currently, lint can require annotations such as the author or license.
+  </Accordion>
+  <Accordion title="Scrub">
+    Content-addressable storage validates data on write and read, but bit rot can occur while data sits idle. Scrub scans stored images in the background to catch errors early.
+  </Accordion>
+  <Accordion title="Trust">
+    Verify image signatures with public keys or certificates that you upload through the zot API. This extension enables and configures that function. See [Verify image signatures](/security/signatures).
+  </Accordion>
+  <Accordion title="Metrics">
+    Adds a Prometheus-compatible node exporter, which isn't present in the minimal build. See [Monitoring](/operations/monitoring).
+  </Accordion>
+  <Accordion title="Graphical user interface">
+    Browse images and artifacts in a web interface, and copy download commands for tools such as docker, podman, and skopeo. See [Web UI](/use/web-ui).
+  </Accordion>
+  <Accordion title="User preferences">
+    An API for per-user repository preferences. Only authenticated users can use it. It currently supports toggling the star (favorite) and bookmark icons for a repository.
+  </Accordion>
+</AccordionGroup>
