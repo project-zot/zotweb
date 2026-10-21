@@ -1,0 +1,25 @@
+name: Docs CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    name: Validate docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Mintlify CLI
+        run: npm install -g mint
+      - name: Validate build
+        run: mint validate
+      - name: Check for broken links
+        run: mint broken-links
+      - name: Check generated redirects are up to date
+        run: |
+          python3 scripts/build-redirects.py
+          git diff --exit-code docs.json landing/

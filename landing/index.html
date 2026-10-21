@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>zot: the OCI-native container registry</title>
+<meta name="description" content="zot is a production-ready, vendor-neutral, OCI-native container image registry. One binary, no root, with search, signatures, scanning, and sync.">
+<meta name="go-import" content="zotregistry.dev/zot/v2 git https://github.com/project-zot/zot">
+<meta name="go-source" content="zotregistry.dev/zot/v2 https://github.com/project-zot/zot https://github.com/project-zot/zot/tree/main{/dir} https://github.com/project-zot/zot/blob/main{/dir}/{file}#L{line}">
+<meta property="og:title" content="zot: the OCI-native container registry">
+<meta property="og:description" content="One binary, no root, with search, signatures, scanning, and sync.">
+<meta property="og:image" content="https://zotregistry.dev/assets/og.png">
+<meta property="og:url" content="https://zotregistry.dev/">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="canonical" href="https://zotregistry.dev/">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<style>
+:root{--bg:#fff;--fg:#0f172a;--muted:#475569;--line:#e2e8f0;--card:#f8fafc;--primary:#4f46e5;--primary-fg:#fff;--soft:#eef2ff;--code:#0b1020;--code-fg:#e2e8f0;--glow:rgba(99,102,241,.18)}
+@media (prefers-color-scheme:dark){:root{--bg:#0b0f1a;--fg:#f1f5f9;--muted:#a3aec2;--line:#1e293b;--card:#111827;--primary:#818cf8;--primary-fg:#0b0f1a;--soft:#1e1b4b;--code:#060912;--glow:rgba(129,140,248,.16)}}
+*{box-sizing:border-box}html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:inherit}.wrap{max-width:1120px;margin:0 auto;padding:0 20px}
+header{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+header .wrap{display:flex;align-items:center;justify-content:space-between;height:64px}
+.logo img{height:28px;display:block}.logo .d{display:none}
+@media (prefers-color-scheme:dark){.logo .l{display:none}.logo .d{display:block}}
+nav{display:flex;align-items:center;gap:22px;font-size:15px}nav a{text-decoration:none;color:var(--muted)}nav a:hover{color:var(--fg)}
+.btn{display:inline-block;padding:10px 18px;border-radius:10px;font-weight:600;text-decoration:none;border:1px solid var(--line)}
+.btn.primary{background:var(--primary);color:var(--primary-fg);border-color:transparent}.btn.primary:hover{filter:brightness(1.08)}
+nav .btn.primary{color:var(--primary-fg);padding:8px 14px;font-size:14px}
+.hero{padding:88px 0 56px;text-align:center;background:radial-gradient(60% 60% at 50% 0,var(--glow),transparent 70%)}
+.badge{display:inline-block;font-size:13px;font-weight:600;color:var(--primary);background:var(--soft);padding:4px 12px;border-radius:99px}
+h1{font-size:clamp(34px,6vw,60px);line-height:1.08;letter-spacing:-.03em;margin:18px auto 16px;max-width:820px}
+.hero p{font-size:19px;color:var(--muted);max-width:660px;margin:0 auto 30px}
+.cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+pre{background:var(--code);color:var(--code-fg);border-radius:12px;padding:18px 20px;overflow-x:auto;font:14px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace;text-align:left;margin:0}
+.term{max-width:680px;margin:44px auto 0}.c{color:#64748b}
+section{padding:56px 0}h2{font-size:30px;letter-spacing:-.02em;margin:0 0 8px}.sub{color:var(--muted);margin:0 0 28px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px}.grid.f{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px;text-decoration:none;transition:border-color .15s,transform .15s}
+a.card:hover{border-color:var(--primary);transform:translateY(-2px)}
+.card h3{margin:0 0 6px;font-size:17px}.card p{margin:0;color:var(--muted);font-size:15px}
+.ico{width:36px;height:36px;border-radius:10px;background:var(--soft);color:var(--primary);display:grid;place-items:center;font-weight:700;margin-bottom:12px}
+.band{border:1px solid var(--line);border-radius:18px;padding:36px;display:flex;gap:24px;align-items:center;justify-content:space-between;flex-wrap:wrap;background:var(--card)}
+footer{border-top:1px solid var(--line);padding:32px 0;color:var(--muted);font-size:14px}
+footer .wrap{display:flex;gap:20px;justify-content:space-between;flex-wrap:wrap}footer .links{display:flex;gap:18px}
+@media (max-width:640px){nav .hide{display:none}.hero{padding-top:56px}}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <a class="logo" href="/" aria-label="zot"><img class="l" src="assets/light.svg" alt="zot"><img class="d" src="assets/dark.svg" alt="zot"></a>
+  <nav>
+    <a class="hide" href="https://docs.zotregistry.dev/">Docs</a>
+    <a class="hide" href="https://docs.zotregistry.dev/api-reference/introduction">API</a>
+    <a class="hide" href="https://docs.zotregistry.dev/changelog">Changelog</a>
+    <a href="https://github.com/project-zot/zot">GitHub</a>
+    <a class="btn primary" href="https://docs.zotregistry.dev/quickstart">Get started</a>
+  </nav>
+</div></header>
+
+<main>
+<div class="hero"><div class="wrap">
+  <span class="badge">CNCF sandbox project</span>
+  <h1>The OCI-native container registry</h1>
+  <p>zot is a production-ready, vendor-neutral registry. One binary, no root privileges, and built-in search, signatures, scanning, and sync.</p>
+  <div class="cta">
+    <a class="btn primary" href="https://docs.zotregistry.dev/quickstart">Quickstart</a>
+    <a class="btn" href="https://docs.zotregistry.dev/">Read the docs</a>
+  </div>
+  <div class="term"><pre><span class="c"># run zot, then push an image</span>
+docker run -d -p 5000:5000 ghcr.io/project-zot/zot:latest
+skopeo copy --dest-tls-verify=false \
+  docker://alpine:latest docker://localhost:5000/alpine:latest</pre></div>
+</div></div>
+
+<section><div class="wrap">
+  <h2>Everything a registry should do</h2>
+  <p class="sub">Standards-based at the core, with optional extensions you turn on when you need them.</p>
+  <div class="grid f">
+    <div class="card"><div class="ico">O</div><h3>OCI-native</h3><p>Conforms to the OCI Distribution Spec and stores images in OCI image layout.</p></div>
+    <div class="card"><div class="ico">1</div><h3>Single binary</h3><p>All features ship in one binary that runs without root.</p></div>
+    <div class="card"><div class="ico">S</div><h3>Signed and scanned</h3><p>Verify cosign and notation signatures and scan images for CVEs.</p></div>
+    <div class="card"><div class="ico">Q</div><h3>Search and UI</h3><p>Query images with GraphQL, browse them in a web UI, or use the zli CLI.</p></div>
+    <div class="card"><div class="ico">M</div><h3>Sync and mirror</h3><p>Pull through and mirror from other registries, on demand or on a schedule.</p></div>
+    <div class="card"><div class="ico">H</div><h3>Scale and secure</h3><p>Scale out, use S3, GCS, or Azure storage, and protect access with OIDC, LDAP, and mTLS.</p></div>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <h2>Jump in</h2><p class="sub">Pick the path that matches what you're doing.</p>
+  <div class="grid">
+    <a class="card" href="https://docs.zotregistry.dev/install/choose-method"><h3>Install &rarr;</h3><p>Linux, Docker, or Kubernetes with Helm.</p></a>
+    <a class="card" href="https://docs.zotregistry.dev/configuration/overview"><h3>Configure &rarr;</h3><p>Storage, TLS, extensions, and curated examples.</p></a>
+    <a class="card" href="https://docs.zotregistry.dev/security/authentication"><h3>Secure &rarr;</h3><p>Authentication, access control, and signatures.</p></a>
+    <a class="card" href="https://docs.zotregistry.dev/api-reference/introduction"><h3>API reference &rarr;</h3><p>Endpoints, auth, and examples.</p></a>
+  </div>
+</div></section>
+
+<section><div class="wrap"><div class="band">
+  <div><h2>Join the community</h2><p class="sub" style="margin:0">Ask questions on CNCF Slack or contribute on GitHub.</p></div>
+  <div class="cta"><a class="btn" href="https://cloud-native.slack.com/archives/C03EGRE4QGH">Slack</a><a class="btn primary" href="https://github.com/project-zot/zot">GitHub</a></div>
+</div></div></section>
+</main>
+
+<footer><div class="wrap">
+  <div>Copyright &copy; 2019&ndash;2026 The zot project authors. Apache 2.0. The Linux Foundation&reg; (TLF) has registered trademarks and uses trademarks. See <a href="https://www.linuxfoundation.org/trademark-usage/">Trademark Usage</a>.</div>
+  <div class="links"><a href="https://docs.zotregistry.dev/">Docs</a><a href="https://github.com/project-zot/zot">GitHub</a><a href="https://twitter.com/zothub">X</a></div>
+</div></footer>
+</body>
+</html>

@@ -1,0 +1,58 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Not found | zot</title>
+<meta http-equiv="refresh" content="3; url=https://docs.zotregistry.dev/">
+
+<script>
+(function () {
+  var map = {
+ "general/whats-new": "/changelog",
+ "general/concepts": "/",
+ "general/features": "/features",
+ "general/architecture": "/concepts/architecture",
+ "general/extensions": "/concepts/extensions",
+ "general/releases": "/install/releases",
+ "general/glossary": "/reference/glossary",
+ "general/project": "/community/about",
+ "user-guides/user-guide-datapath": "/use/push-pull",
+ "user-guides/user-guide-gui": "/use/web-ui",
+ "user-guides/zli": "/use/zli",
+ "install-guides/install-guide-linux": "/install/linux",
+ "install-guides/install-guide-k8s": "/install/kubernetes-helm",
+ "admin-guide/admin-getting-started": "/install/choose-method",
+ "admin-guide/admin-configuration": "/configuration/overview",
+ "developer-guide/onboarding": "/developers/onboarding",
+ "developer-guide/extensions-dev": "/developers/extensions",
+ "developer-guide/api-user-guide": "/api-reference/introduction",
+ "developer-guide/api-reference": "/api-reference/introduction",
+ "developer-guide/contributing": "/developers/contributing",
+ "articles/building-ci-cd-pipeline": "/guides/ci-cd-pipeline",
+ "articles/authn-authz": "/security/authentication",
+ "articles/verifying-signatures": "/security/signatures",
+ "articles/immutable-tags": "/security/immutable-tags",
+ "articles/workflow": "/guides/provenance-workflow",
+ "articles/security-posture": "/security/posture",
+ "articles/storage": "/configuration/storage/overview",
+ "articles/retention": "/operations/retention-gc",
+ "articles/mirroring": "/operations/mirroring",
+ "articles/clustering": "/operations/clustering/overview",
+ "articles/scaleout": "/operations/clustering/scale-out",
+ "articles/high-availability": "/operations/clustering/high-availability",
+ "articles/monitoring": "/operations/monitoring",
+ "articles/graphql": "/use/search-graphql",
+ "articles/benchmarking-with-zb": "/operations/benchmarking-zb",
+ "articles/pprofiling": "/operations/profiling",
+ "articles/kind-deploy": "/guides/kind",
+ "articles/containerd": "/clients/containerd",
+ "articles/docker": "/clients/docker",
+ "articles/cve-scanning": "/security/cve-scanning",
+ "articles/events": "/operations/events"
+};
+  var p = location.pathname.replace(/^\/+|\/+$/g, "").split("/");
+  if (/^(latest|zot|v\d+(\.\d+){1,2})$/.test(p[0] || "")) p.shift();
+  var key = p.join("/").replace(/\.html$/, "");
+  var dest = map[key];
+  var target = "https://docs.zotregistry.dev" + (dest || "/");
+  setTimeout(function () { location.replace(target + (dest ? location.hash : "")); }, 0);
+})();
+</script>
+</head>
+<body style="font:16px system-ui;text-align:center;padding:15vh 20px"><h1>Page not found</h1><p>The documentation has moved to <a href="https://docs.zotregistry.dev/">docs.zotregistry.dev</a>. Redirecting&hellip;</p></body></html>

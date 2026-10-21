@@ -1,0 +1,15 @@
+name: Spellcheck
+on:
+  pull_request:
+    paths: ["**/*.mdx", ".wordlist.txt", ".spellcheck.yaml"]
+
+jobs:
+  spellcheck:
+    runs-on: ubuntu-latest
+    # Advisory until the wordlist has been tuned against MDX content.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rojopolis/spellcheck-github-actions@v0
+        with:
+          config_path: .spellcheck.yaml

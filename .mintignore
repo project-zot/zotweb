@@ -5,3 +5,10 @@
 # Draft content
 drafts/
 *.draft.mdx
+
+# Static landing page for zotregistry.dev (deployed separately to GitHub Pages)
+landing/
+
+# Static landing page (deployed separately) and maintenance scripts
+landing/
+scripts/
