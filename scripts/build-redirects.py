@@ -43,6 +43,7 @@ js = """<script>
 })();
 </script>""" % (json.dumps(m, indent=1), DOCS)
 page = re.sub(r"<script>.*?</script>", "", page, flags=re.S)
+page = re.sub(r"\n{2,}", "\n", page)  # keep output stable across re-runs
 page = page.replace("</head>", js + "\n</head>")
 open("landing/404.html", "w").write(page)
 print(len(m), "redirects applied")

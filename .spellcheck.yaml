@@ -17,5 +17,5 @@ matrix:
       - pre
       - json
   sources:
-  - '**/*.mdx|!drafts/**|!node_modules/**'
+  - '**/*.mdx|!drafts/**|!node_modules/**|!v2.1.x/**'
   default_encoding: utf-8

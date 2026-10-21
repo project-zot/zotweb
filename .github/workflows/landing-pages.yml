@@ -1,11 +1,9 @@
 # Deploys landing/ (the static zotregistry.dev site) to GitHub Pages.
-# Enable only if this repository hosts the apex site. If the apex site stays in
+# Manual only. Use it if this repository hosts the apex site, which requires GitHub Pages
+# to be enabled here (Settings > Pages > Source: GitHub Actions). If the apex site stays in
 # project-zot/project-zot.github.io, copy landing/ there instead (see drafts/CUTOVER.md).
 name: Deploy landing page
 on:
-  push:
-    branches: [main]
-    paths: ["landing/**"]
   workflow_dispatch:
 
 permissions:

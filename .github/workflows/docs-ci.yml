@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
 
+env:
+  # Pinned so CI is reproducible. An unpinned install can fail with ETARGET when a new
+  # mint release is published before its @mintlify/cli dependency has propagated.
+  MINT_VERSION: "4.2.1076"
+
 jobs:
   validate:
     name: Validate docs
@@ -14,7 +19,12 @@ jobs:
         with:
           node-version: 22
       - name: Install Mintlify CLI
-        run: npm install -g mint
+        run: |
+          for attempt in 1 2 3; do
+            npm install -g "mint@${MINT_VERSION}" && exit 0
+            echo "npm install failed (attempt ${attempt}), retrying"; sleep 15
+          done
+          exit 1
       - name: Validate build
         run: mint validate
       - name: Check for broken links

@@ -7,7 +7,7 @@ icon: "house"
 **zot** is an open-source container image registry server based purely on [OCI](https://opencontainers.org/) standards. It stores images in the OCI image layout and speaks the OCI Distribution Specification on the wire, so any compliant client works with it.
 
 <Info>
-  zot = OCI Distribution Specification + OCI image format. Everything else is an optional extension.
+  zot = OCI Distribution Specification + OCI image format. Features beyond the specification are extensions that you turn on when you need them.
 </Info>
 
 <CardGroup cols={2}>
@@ -56,8 +56,11 @@ zot is built for developers by developers.
   </Card>
 </CardGroup>
 
-<Frame caption="zot serves the OCI Distribution Specification API on top of an OCI image layout.">
-  <img src="/images/zot-overview.jpg" alt="Diagram of registry clients connecting to zot's OCI Distribution Specification HTTP API, which reads and writes an OCI image format storage layout" style={{ maxWidth: "320px" }} />
+<Frame caption="Clients speak the OCI Distribution Specification. zot stores everything as an OCI image layout.">
+  <div className="overflow-x-auto">
+    <img style={{ minWidth: 600 }} className="dark:hidden" src="/images/zot-overview-light.svg" alt="Diagram. Registry clients such as docker, podman, skopeo, containerd, helm and oras talk to zot over the OCI Distribution Specification HTTP API, for example GET /v2/alpine/manifests/edge. zot stores data on disk as an OCI image layout with an oci-layout file, an index.json and a blobs/sha256 directory." />
+    <img style={{ minWidth: 600 }} className="hidden dark:block" src="/images/zot-overview-dark.svg" alt="Diagram. Registry clients such as docker, podman, skopeo, containerd, helm and oras talk to zot over the OCI Distribution Specification HTTP API, for example GET /v2/alpine/manifests/edge. zot stores data on disk as an OCI image layout with an oci-layout file, an index.json and a blobs/sha256 directory." />
+  </div>
 </Frame>
 
 ## At a glance
@@ -65,7 +68,7 @@ zot is built for developers by developers.
 | | |
 |---|---|
 | **Distribution Specification conformance** | Yes |
-| **Project status** | CNCF Sandbox project |
+| **Project status** | CNCF Sandbox project, accepted December 2022 |
 | **License** | Apache 2.0 |
 | **Storage layout** | OCI v1 image layout |
 | **Authentication and authorization** | Built in |
