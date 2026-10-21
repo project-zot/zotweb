@@ -1,0 +1,102 @@
+---
+title: "Background tasks"
+description: "Garbage collection, scrubbing, and sync run on a scheduler. Tune their schedule and concurrency."
+icon: "clock"
+---
+
+zot runs periodic work, such as garbage collection, registry sync, and scrubbing, as background tasks. A task scheduler queues and runs them, and it's designed not to degrade or interrupt requests served over the HTTP APIs.
+
+| Task | Controlled by | More |
+|---|---|---|
+| [Garbage collection](#garbage-collection) | `storage.gc`, `gcDelay`, `gcInterval`, `gcTimeWindow` | [Retention and garbage collection](/v2.1.x/operations/retention-gc) |
+| Tag retention | `storage.retention` | [Retention and garbage collection](/v2.1.x/operations/retention-gc) |
+| [Scrub](#scrub) | `extensions.scrub` | [Enable extensions](/v2.1.x/configuration/extensions#scrub) |
+| Sync | `extensions.sync` | [Mirroring and sync](/v2.1.x/operations/mirroring) |
+| CVE database refresh | `extensions.search.cve.updateInterval` | [CVE scanning](/v2.1.x/security/cve-scanning) |
+
+## Scheduler concurrency
+
+By default, the scheduler runs at most four times as many tasks at once as there are CPUs available to the zot process. You rarely need to change this. To set a different maximum, use `scheduler.numWorkers`:
+
+```json
+{
+  "scheduler": {
+    "numWorkers": 3
+  }
+}
+```
+
+<ParamField path="scheduler.numWorkers" type="integer" default="4 × CPUs">
+  Maximum number of tasks that run simultaneously. If you omit it or set it to `0`, zot uses four times the number of CPUs.
+</ParamField>
+
+`scheduler` is read at startup. Changing it needs a restart.
+
+## Garbage collection
+
+When you delete an image manifest, its blobs can be purged to free space. The OCI Distribution Specification APIs aren't transactional across blobs and manifests, so zot takes care not to leave storage inconsistent. Garbage collection runs inline: **you don't need to take the registry offline**.
+
+```json
+"storage": {
+  "rootDirectory": "/var/lib/registry",
+  "gc": true,
+  "gcDelay": "1h",
+  "gcInterval": "1h",
+  "gcTimeWindow": "01:00-08:00"
+}
+```
+
+<ParamField path="storage.gc" type="boolean" default="true">
+  Enables garbage collection.
+</ParamField>
+
+<ParamField path="storage.gcDelay" type="duration" default="1h">
+  How long an unreferenced blob must age before it can be deleted. Set it based on client network speeds and blob sizes, so GC doesn't delete a blob that a slow upload hasn't referenced yet. It can't be negative.
+</ParamField>
+
+<ParamField path="storage.gcInterval" type="duration" default="1h">
+  Time between periodic garbage collection runs. It can't be negative.
+</ParamField>
+
+<ParamField path="storage.gcTimeWindow" type="string">
+  A daily window in UTC, `HH:MM-HH:MM`, in which a new periodic GC run may start. Without it, GC can start at any time. A window that ends before it starts, such as `22:00-06:00`, wraps past midnight. The start and end can't be equal. A run that starts inside the window finishes even if it passes the end.
+</ParamField>
+
+<Note>
+  If `gc` is `false`, zot ignores `gcDelay`, `gcInterval`, and `gcTimeWindow` and logs a warning. For `subPaths`, a `gcDelay` that is zero or negative is invalid when `gc` is `true`.
+</Note>
+
+Garbage collection and the tag [retention policies](/v2.1.x/operations/retention-gc) work together: retention decides which tags to remove, and GC reclaims the space. GC settings reload without a restart. See [Configuration overview](/v2.1.x/configuration/overview#reload-configuration-without-a-restart).
+
+## Scrub
+
+Content-addressed images are validated when stored and retrieved, but bit rot can occur while data sits idle. The `scrub` extension periodically checks the integrity of manifests and blobs. It's a full-image extension.
+
+```json
+"extensions": {
+  "scrub": {
+    "enable": true,
+    "interval": "24h"
+  }
+}
+```
+
+<ParamField path="extensions.scrub.interval" type="duration" default="24h">
+  Time between scrub runs. The minimum is `2h`.
+</ParamField>
+
+Scrubbing can slightly reduce registry performance while it runs.
+
+### Run a scrub on demand
+
+You can also check storage once, from the command line, without enabling the extension:
+
+```bash
+zot scrub config.json
+```
+
+The command exits with an error if a zot server is already running with that configuration's address and port. Shut the server down first.
+
+## Sync
+
+Sync can poll upstream registries on a schedule (`pollInterval`), and the scheduler runs those periodic syncs. It can also fetch images on demand when a client pulls them. See [Mirroring and sync](/v2.1.x/operations/mirroring).

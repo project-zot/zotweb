@@ -1,0 +1,134 @@
+---
+title: "Releases and images"
+description: "Supported platforms, full and minimal binaries, naming, and where to download zot."
+icon: "box-archive"
+---
+
+## Supported platforms
+
+zot is supported on Linux and macOS with Intel or ARM processors.
+
+| OS | Architecture | Platform |
+|---|---|---|
+| `linux` | `amd64` | Intel-based Linux servers |
+| `linux` | `arm64` | ARM-based servers and Raspberry Pi 4 |
+| `darwin` | `amd64` | Intel-based macOS |
+| `darwin` | `arm64` | ARM-based macOS (Apple M1 and later) |
+| `freebsd` | `amd64` | Intel-based FreeBSD |
+| `freebsd` | `arm64` | ARM-based FreeBSD |
+
+<Note>
+  Binaries are available for FreeBSD, but building container images for FreeBSD isn't supported.
+</Note>
+
+## Full and minimal binaries
+
+- A **full** binary is compiled with all [extensions](/v2.1.x/concepts/extensions), including metrics, sync, search, and scrub.
+- A **minimal** binary is a Distribution Specification conformant registry compiled with only a minimal set of code and libraries. This reduces the attack surface and suits a registry embedded in a product.
+
+## Binary file names
+
+Binary names combine the target OS and architecture:
+
+| Flavor | Name | Example |
+|---|---|---|
+| Full | `zot-<os>-<architecture>` | `zot-linux-amd64` |
+| Minimal | `zot-<os>-<architecture>-minimal` | `zot-linux-amd64-minimal` |
+
+<Tip>
+  After you download a binary, you can rename it to `zot`. The documentation uses `zot` as the executable name.
+</Tip>
+
+## Where to get zot
+
+### Binaries
+
+Go to the [releases page](https://github.com/project-zot/zot/releases), pick a release, and download the binary for your platform from **Assets**. Make it executable with `chmod +x`. On macOS, use the `darwin` binary.
+
+### Container images
+
+zot publishes multi-architecture OCI images to GitHub Container Registry. Docker and Podman pull the right architecture for your platform. You can use `latest` or a release tag such as `v2.1.22`.
+
+<Tabs>
+  <Tab title="zot">
+    `ghcr.io/project-zot/zot` is the full-featured image.
+
+    - All extensions are built in: sync, search, scrub, metrics, lint, ui, mgmt, profile, userprefs, imagetrust, and events.
+    - **Enabled in the default configuration:** `search` (with CVE scanning) and `ui`. The management API and user preferences turn on automatically with them.
+    - **Need configuration to enable:** `sync`, `scrub`, `metrics`, `lint`, `trust` (image trust), and `events`.
+    - **Build-time only:** `profile` has no configuration key. Profiling endpoints exist only in binaries built with the `profile` label.
+
+    The shipped file also contains an `extensions.mgmt` key. It's redundant: zot ignores it and logs a warning, because the management API turns on with `search`.
+
+    See [Enable extensions](/v2.1.x/configuration/extensions).
+
+    Default configuration, at `/etc/zot/config.json`:
+
+    ```json
+    {
+      "storage": { "rootDirectory": "/var/lib/registry" },
+      "http": { "address": "0.0.0.0", "port": "5000", "compat": ["docker2s2"] },
+      "log": { "level": "debug" },
+      "extensions": {
+        "search": { "enable": true, "cve": { "updateInterval": "2h" } },
+        "ui": { "enable": true },
+        "mgmt": { "enable": true }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="zot-minimal">
+    `ghcr.io/project-zot/zot-minimal` has no extensions, only core Distribution Specification functionality.
+
+    ```json
+    {
+      "storage": { "rootDirectory": "/var/lib/registry" },
+      "http": { "address": "0.0.0.0", "port": "5000" },
+      "log": { "level": "debug" }
+    }
+    ```
+  </Tab>
+  <Tab title="zxp">
+    `ghcr.io/project-zot/zxp` is a standalone metrics exporter for `zot-minimal` deployments. Its configuration is at `/etc/zxp/config.json`:
+
+    ```json
+    {
+      "Server": { "protocol": "http", "host": "127.0.0.1", "port": "5000" },
+      "Exporter": { "port": "5001", "log": { "level": "debug" } }
+    }
+    ```
+  </Tab>
+  <Tab title="zb">
+    `ghcr.io/project-zot/zb` is the [benchmarking tool](/v2.1.x/operations/benchmarking-zb).
+  </Tab>
+</Tabs>
+
+```bash
+docker pull ghcr.io/project-zot/zot:latest
+docker pull ghcr.io/project-zot/zot-minimal:latest
+```
+
+<Note>
+  Container images are Linux-based (or FreeBSD-based). On macOS, Docker and Podman run Linux containers in a VM, and the runtime selects the matching Linux architecture.
+</Note>
+
+## Build from source
+
+Install the Go toolchain at the version `go.mod` requires, then:
+
+```bash
+git clone https://github.com/project-zot/zot.git
+cd zot
+make OS=linux ARCH=amd64 binary          # full
+make OS=linux ARCH=amd64 binary-minimal  # minimal
+```
+
+The default is `linux` and `amd64`. The binary is written to `bin/`, for example `bin/zot-linux-amd64-minimal`.
+
+## Companion tools
+
+Install the [`zli`](/v2.1.x/use/zli) command-line client and the [`zb`](/v2.1.x/operations/benchmarking-zb) benchmarking tool alongside zot.
+
+## License
+
+zot is released under the [Apache License 2.0](https://github.com/project-zot/zot/blob/main/LICENSE).

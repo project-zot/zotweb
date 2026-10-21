@@ -1,0 +1,80 @@
+---
+title: "Introduction"
+description: "zot is a production-ready, vendor-neutral container image registry built purely on OCI standards."
+icon: "house"
+---
+
+**zot** is an open-source container image registry server based purely on [OCI](https://opencontainers.org/) standards. It stores images in the OCI image layout and speaks the OCI Distribution Specification on the wire, so any compliant client works with it.
+
+<Info>
+  zot = OCI Distribution Specification + OCI image format. Everything else is an optional extension.
+</Info>
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="bolt" href="/v2.1.x/quickstart">
+    Run zot and push your first image in five minutes.
+  </Card>
+  <Card title="Choose an install method" icon="download" href="/v2.1.x/install/choose-method">
+    Linux, Docker, or Kubernetes with Helm.
+  </Card>
+  <Card title="Configure zot" icon="sliders" href="/v2.1.x/configuration/overview">
+    Storage, TLS, extensions, and ready-to-use examples.
+  </Card>
+  <Card title="Secure your registry" icon="shield-halved" href="/v2.1.x/security/authentication">
+    Authentication, access control, and signature verification.
+  </Card>
+</CardGroup>
+
+## What is an OCI image registry?
+
+An OCI image registry is a server that stores, manages, and shares container images. A developer pushes an image to the registry. Other users and systems pull it to run it. The [OCI Distribution Specification](https://github.com/opencontainers/distribution-spec) defines the standard HTTP API for these operations.
+
+You can host zot on a public or private server as part of your CI/CD pipeline. In its minimal form, you can also embed zot in a product. In both cases zot gives you a secure software supply chain for container images.
+
+## Why zot?
+
+zot is built for developers by developers.
+
+<CardGroup cols={3}>
+  <Card title="OCI standards only" icon="box">
+    OCI on the wire and on disk. A clear line separates the core Distribution Specification from zot-specific extensions.
+  </Card>
+  <Card title="Single binary" icon="file-zipper">
+    One binary with many built-in features, configured by one file. It runs without root privileges.
+  </Card>
+  <Card title="Supply chain security" icon="signature">
+    Verify cosign and notation signatures, scan for CVEs, and harden the build.
+  </Card>
+  <Card title="Built-in access control" icon="user-lock">
+    Authentication and authorization are part of zot, not an add-on.
+  </Card>
+  <Card title="Efficient storage" icon="database">
+    Inline garbage collection and deduplication, with local, S3, GCS, or Azure storage.
+  </Card>
+  <Card title="Runs anywhere" icon="server">
+    Cloud, bare metal, and embedded devices, with a minimal build for a smaller attack surface.
+  </Card>
+</CardGroup>
+
+<Frame caption="zot serves the OCI Distribution Specification API on top of an OCI image layout.">
+  <img src="/images/zot-overview.jpg" alt="Diagram of registry clients connecting to zot's OCI Distribution Specification HTTP API, which reads and writes an OCI image format storage layout" style={{ maxWidth: "320px" }} />
+</Frame>
+
+## At a glance
+
+| | |
+|---|---|
+| **Distribution Specification conformance** | Yes |
+| **Project status** | CNCF Sandbox project |
+| **License** | Apache 2.0 |
+| **Storage layout** | OCI v1 image layout |
+| **Authentication and authorization** | Built in |
+| **Garbage collection and deduplication** | Inline |
+| **Cloud storage** | Yes (S3, GCS, Azure) |
+| **Delete by tag** | Yes |
+| **Vulnerability scanning** | Built in |
+| **Image signatures** | Built in (cosign, notation) |
+| **Command line and web UI** | Yes (`zli` and the web UI) |
+| **Minimal build** | Yes. A minimal Distribution Specification registry with fewer dependencies. |
+
+See [all features](/v2.1.x/features) or learn how zot is [designed](/v2.1.x/concepts/architecture).

@@ -1,53 +1,409 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
-  "name": "Mintlify Starter Kit",
+  "name": "zot",
+  "description": "zot is a production-ready, vendor-neutral OCI-native container image registry: a single binary with search, signatures, scanning, sync, and more.",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#4F46E5",
+    "light": "#818CF8",
+    "dark": "#4338CA"
   },
   "favicon": "/favicon.svg",
+  "appearance": {
+    "default": "system"
+  },
   "navigation": {
-    "pages": [
-      {
-        "group": "Getting Started",
-        "pages": [
-          "index",
-          "quickstart"
-        ]
-      }
-    ],
     "global": {
       "anchors": [
         {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
+          "anchor": "GitHub",
+          "href": "https://github.com/project-zot/zot",
+          "icon": "github"
         },
         {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
+          "anchor": "Releases",
+          "href": "https://github.com/project-zot/zot/releases",
+          "icon": "tag"
+        },
+        {
+          "anchor": "Community",
+          "href": "https://cloud-native.slack.com/archives/C03EGRE4QGH",
+          "icon": "slack"
         }
       ]
-    }
+    },
+    "versions": [
+      {
+        "version": "latest",
+        "tabs": [
+          {
+            "tab": "Documentation",
+            "icon": "book-open",
+            "groups": [
+              {
+                "group": "Get started",
+                "icon": "rocket",
+                "pages": [
+                  "index",
+                  "quickstart",
+                  "features"
+                ]
+              },
+              {
+                "group": "Concepts",
+                "icon": "lightbulb",
+                "pages": [
+                  "concepts/architecture",
+                  "concepts/extensions",
+                  "concepts/comparison",
+                  "reference/glossary"
+                ]
+              },
+              {
+                "group": "Install",
+                "icon": "download",
+                "pages": [
+                  "install/choose-method",
+                  "install/linux",
+                  "install/docker",
+                  "install/kubernetes-helm",
+                  "install/releases",
+                  "install/upgrade"
+                ]
+              },
+              {
+                "group": "Configure",
+                "icon": "sliders",
+                "pages": [
+                  "configuration/overview",
+                  "configuration/http",
+                  "configuration/logging",
+                  "configuration/extensions",
+                  "configuration/background-tasks",
+                  "configuration/examples"
+                ]
+              },
+              {
+                "group": "Storage",
+                "icon": "hard-drive",
+                "pages": [
+                  "configuration/storage/overview",
+                  "configuration/storage/local",
+                  "configuration/storage/s3",
+                  "configuration/storage/gcs",
+                  "configuration/storage/azure",
+                  "configuration/storage/cache-drivers"
+                ]
+              },
+              {
+                "group": "Security",
+                "icon": "shield-halved",
+                "pages": [
+                  "security/authentication",
+                  "security/mtls",
+                  "security/ldap",
+                  "security/openid",
+                  "security/api-keys",
+                  "security/access-control",
+                  "security/signatures",
+                  "security/immutable-tags",
+                  "security/cve-scanning",
+                  "security/posture"
+                ]
+              },
+              {
+                "group": "Operate",
+                "icon": "gears",
+                "pages": [
+                  "operations/retention-gc",
+                  "operations/mirroring",
+                  "operations/clustering/overview",
+                  "operations/clustering/high-availability",
+                  "operations/clustering/scale-out",
+                  "operations/monitoring",
+                  "operations/events",
+                  "operations/backup-restore",
+                  "operations/troubleshooting",
+                  "operations/production-checklist",
+                  "operations/benchmarking-zb",
+                  "operations/profiling"
+                ]
+              },
+              {
+                "group": "Use zot",
+                "icon": "terminal",
+                "pages": [
+                  "use/push-pull",
+                  "use/web-ui",
+                  "use/zli",
+                  "use/zli-reference",
+                  "use/search-graphql",
+                  "use/search-graphql-examples"
+                ]
+              },
+              {
+                "group": "Clients",
+                "icon": "plug",
+                "pages": [
+                  "clients/docker",
+                  "clients/containerd",
+                  "clients/compatibility"
+                ]
+              },
+              {
+                "group": "Tutorials",
+                "icon": "graduation-cap",
+                "pages": [
+                  "guides/ci-cd-pipeline",
+                  "guides/provenance-workflow",
+                  "guides/kind"
+                ]
+              },
+              {
+                "group": "Reference and more",
+                "icon": "book-open",
+                "pages": [
+                  "changelog",
+                  "community/about"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "API reference",
+            "icon": "code",
+            "groups": [
+              {
+                "group": "Guides",
+                "icon": "book",
+                "pages": [
+                  "api-reference/introduction",
+                  "api-reference/search",
+                  "api-reference/extensions"
+                ]
+              },
+              {
+                "group": "Endpoints",
+                "icon": "code",
+                "openapi": "api-reference/openapi.yaml"
+              }
+            ]
+          },
+          {
+            "tab": "Developers",
+            "icon": "laptop-code",
+            "groups": [
+              {
+                "group": "Developers",
+                "icon": "code",
+                "pages": [
+                  "developers/onboarding",
+                  "developers/extensions",
+                  "developers/contributing"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "version": "v2.1.x",
+        "tabs": [
+          {
+            "tab": "Documentation",
+            "icon": "book-open",
+            "groups": [
+              {
+                "group": "Get started",
+                "icon": "rocket",
+                "pages": [
+                  "v2.1.x/index",
+                  "v2.1.x/quickstart",
+                  "v2.1.x/features"
+                ]
+              },
+              {
+                "group": "Concepts",
+                "icon": "lightbulb",
+                "pages": [
+                  "v2.1.x/concepts/architecture",
+                  "v2.1.x/concepts/extensions",
+                  "v2.1.x/concepts/comparison",
+                  "v2.1.x/reference/glossary"
+                ]
+              },
+              {
+                "group": "Install",
+                "icon": "download",
+                "pages": [
+                  "v2.1.x/install/choose-method",
+                  "v2.1.x/install/linux",
+                  "v2.1.x/install/docker",
+                  "v2.1.x/install/kubernetes-helm",
+                  "v2.1.x/install/releases",
+                  "v2.1.x/install/upgrade"
+                ]
+              },
+              {
+                "group": "Configure",
+                "icon": "sliders",
+                "pages": [
+                  "v2.1.x/configuration/overview",
+                  "v2.1.x/configuration/http",
+                  "v2.1.x/configuration/logging",
+                  "v2.1.x/configuration/extensions",
+                  "v2.1.x/configuration/background-tasks",
+                  "v2.1.x/configuration/examples"
+                ]
+              },
+              {
+                "group": "Storage",
+                "icon": "hard-drive",
+                "pages": [
+                  "v2.1.x/configuration/storage/overview",
+                  "v2.1.x/configuration/storage/local",
+                  "v2.1.x/configuration/storage/s3",
+                  "v2.1.x/configuration/storage/gcs",
+                  "v2.1.x/configuration/storage/azure",
+                  "v2.1.x/configuration/storage/cache-drivers"
+                ]
+              },
+              {
+                "group": "Security",
+                "icon": "shield-halved",
+                "pages": [
+                  "v2.1.x/security/authentication",
+                  "v2.1.x/security/mtls",
+                  "v2.1.x/security/ldap",
+                  "v2.1.x/security/openid",
+                  "v2.1.x/security/api-keys",
+                  "v2.1.x/security/access-control",
+                  "v2.1.x/security/signatures",
+                  "v2.1.x/security/immutable-tags",
+                  "v2.1.x/security/cve-scanning",
+                  "v2.1.x/security/posture"
+                ]
+              },
+              {
+                "group": "Operate",
+                "icon": "gears",
+                "pages": [
+                  "v2.1.x/operations/retention-gc",
+                  "v2.1.x/operations/mirroring",
+                  "v2.1.x/operations/clustering/overview",
+                  "v2.1.x/operations/clustering/high-availability",
+                  "v2.1.x/operations/clustering/scale-out",
+                  "v2.1.x/operations/monitoring",
+                  "v2.1.x/operations/events",
+                  "v2.1.x/operations/backup-restore",
+                  "v2.1.x/operations/troubleshooting",
+                  "v2.1.x/operations/production-checklist",
+                  "v2.1.x/operations/benchmarking-zb",
+                  "v2.1.x/operations/profiling"
+                ]
+              },
+              {
+                "group": "Use zot",
+                "icon": "terminal",
+                "pages": [
+                  "v2.1.x/use/push-pull",
+                  "v2.1.x/use/web-ui",
+                  "v2.1.x/use/zli",
+                  "v2.1.x/use/zli-reference",
+                  "v2.1.x/use/search-graphql",
+                  "v2.1.x/use/search-graphql-examples"
+                ]
+              },
+              {
+                "group": "Clients",
+                "icon": "plug",
+                "pages": [
+                  "v2.1.x/clients/docker",
+                  "v2.1.x/clients/containerd",
+                  "v2.1.x/clients/compatibility"
+                ]
+              },
+              {
+                "group": "Tutorials",
+                "icon": "graduation-cap",
+                "pages": [
+                  "v2.1.x/guides/ci-cd-pipeline",
+                  "v2.1.x/guides/provenance-workflow",
+                  "v2.1.x/guides/kind"
+                ]
+              },
+              {
+                "group": "Reference and more",
+                "icon": "book-open",
+                "pages": [
+                  "v2.1.x/changelog",
+                  "v2.1.x/community/about"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "API reference",
+            "icon": "code",
+            "groups": [
+              {
+                "group": "Guides",
+                "icon": "book",
+                "pages": [
+                  "v2.1.x/api-reference/introduction",
+                  "v2.1.x/api-reference/search",
+                  "v2.1.x/api-reference/extensions"
+                ]
+              },
+              {
+                "group": "Endpoints",
+                "icon": "code",
+                "openapi": {
+                  "source": "v2.1.x/api-reference/openapi.yaml",
+                  "directory": "v2.1.x/api-reference"
+                }
+              }
+            ]
+          },
+          {
+            "tab": "Developers",
+            "icon": "laptop-code",
+            "groups": [
+              {
+                "group": "Developers",
+                "icon": "code",
+                "pages": [
+                  "v2.1.x/developers/onboarding",
+                  "v2.1.x/developers/extensions",
+                  "v2.1.x/developers/contributing"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
   },
   "logo": {
     "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
+    "dark": "/logo/dark.svg",
+    "href": "https://zotregistry.dev"
   },
   "navbar": {
     "links": [
       {
-        "label": "Support",
-        "href": "mailto:support@mintlify.com"
+        "label": "Changelog",
+        "href": "/changelog"
+      },
+      {
+        "label": "GitHub",
+        "href": "https://github.com/project-zot/zot"
       }
     ],
     "primary": {
       "type": "button",
-      "label": "Dashboard",
-      "href": "https://app.mintlify.com"
+      "label": "Get started",
+      "href": "/quickstart"
     }
   },
   "contextual": {
@@ -64,9 +420,184 @@
   },
   "footer": {
     "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
+      "github": "https://github.com/project-zot/zot",
+      "slack": "https://cloud-native.slack.com/archives/C03EGRE4QGH",
+      "x": "https://twitter.com/zothub"
+    }
+  },
+  "redirects": [
+    {
+      "source": "/general/whats-new",
+      "destination": "/changelog"
+    },
+    {
+      "source": "/general/concepts",
+      "destination": "/"
+    },
+    {
+      "source": "/general/features",
+      "destination": "/features"
+    },
+    {
+      "source": "/general/architecture",
+      "destination": "/concepts/architecture"
+    },
+    {
+      "source": "/general/extensions",
+      "destination": "/concepts/extensions"
+    },
+    {
+      "source": "/general/releases",
+      "destination": "/install/releases"
+    },
+    {
+      "source": "/general/glossary",
+      "destination": "/reference/glossary"
+    },
+    {
+      "source": "/general/project",
+      "destination": "/community/about"
+    },
+    {
+      "source": "/user-guides/user-guide-datapath",
+      "destination": "/use/push-pull"
+    },
+    {
+      "source": "/user-guides/user-guide-gui",
+      "destination": "/use/web-ui"
+    },
+    {
+      "source": "/user-guides/zli",
+      "destination": "/use/zli"
+    },
+    {
+      "source": "/install-guides/install-guide-linux",
+      "destination": "/install/linux"
+    },
+    {
+      "source": "/install-guides/install-guide-k8s",
+      "destination": "/install/kubernetes-helm"
+    },
+    {
+      "source": "/admin-guide/admin-getting-started",
+      "destination": "/install/choose-method"
+    },
+    {
+      "source": "/admin-guide/admin-configuration",
+      "destination": "/configuration/overview"
+    },
+    {
+      "source": "/developer-guide/onboarding",
+      "destination": "/developers/onboarding"
+    },
+    {
+      "source": "/developer-guide/extensions-dev",
+      "destination": "/developers/extensions"
+    },
+    {
+      "source": "/developer-guide/api-user-guide",
+      "destination": "/api-reference/introduction"
+    },
+    {
+      "source": "/developer-guide/api-reference",
+      "destination": "/api-reference/introduction"
+    },
+    {
+      "source": "/developer-guide/contributing",
+      "destination": "/developers/contributing"
+    },
+    {
+      "source": "/articles/building-ci-cd-pipeline",
+      "destination": "/guides/ci-cd-pipeline"
+    },
+    {
+      "source": "/articles/authn-authz",
+      "destination": "/security/authentication"
+    },
+    {
+      "source": "/articles/verifying-signatures",
+      "destination": "/security/signatures"
+    },
+    {
+      "source": "/articles/immutable-tags",
+      "destination": "/security/immutable-tags"
+    },
+    {
+      "source": "/articles/workflow",
+      "destination": "/guides/provenance-workflow"
+    },
+    {
+      "source": "/articles/security-posture",
+      "destination": "/security/posture"
+    },
+    {
+      "source": "/articles/storage",
+      "destination": "/configuration/storage/overview"
+    },
+    {
+      "source": "/articles/retention",
+      "destination": "/operations/retention-gc"
+    },
+    {
+      "source": "/articles/mirroring",
+      "destination": "/operations/mirroring"
+    },
+    {
+      "source": "/articles/clustering",
+      "destination": "/operations/clustering/overview"
+    },
+    {
+      "source": "/articles/scaleout",
+      "destination": "/operations/clustering/scale-out"
+    },
+    {
+      "source": "/articles/high-availability",
+      "destination": "/operations/clustering/high-availability"
+    },
+    {
+      "source": "/articles/monitoring",
+      "destination": "/operations/monitoring"
+    },
+    {
+      "source": "/articles/graphql",
+      "destination": "/use/search-graphql"
+    },
+    {
+      "source": "/articles/benchmarking-with-zb",
+      "destination": "/operations/benchmarking-zb"
+    },
+    {
+      "source": "/articles/pprofiling",
+      "destination": "/operations/profiling"
+    },
+    {
+      "source": "/articles/kind-deploy",
+      "destination": "/guides/kind"
+    },
+    {
+      "source": "/articles/containerd",
+      "destination": "/clients/containerd"
+    },
+    {
+      "source": "/articles/docker",
+      "destination": "/clients/docker"
+    },
+    {
+      "source": "/articles/cve-scanning",
+      "destination": "/security/cve-scanning"
+    },
+    {
+      "source": "/articles/events",
+      "destination": "/operations/events"
+    }
+  ],
+  "seo": {
+    "indexing": "navigable",
+    "metatags": {
+      "og:site_name": "zot documentation",
+      "og:image": "https://docs.zotregistry.dev/images/og.png",
+      "twitter:card": "summary_large_image",
+      "twitter:image": "https://docs.zotregistry.dev/images/og.png"
     }
   }
 }

@@ -1,0 +1,76 @@
+---
+title: "Local storage"
+description: "Store images on a local or network filesystem, and serve multiple storage locations from one registry."
+icon: "folder"
+---
+
+zot can store and serve images from one or more directories on a local filesystem. You need at least one root directory. When clients call the HTTP APIs, all directories appear as a single data store.
+
+<Note>
+  Remote filesystems that are mounted and accessible locally, such as NFS or FUSE, are treated as local filesystems.
+</Note>
+
+## Configure local storage
+
+Set `storage.rootDirectory`. All other settings are optional.
+
+```json
+{
+  "storage": {
+    "rootDirectory": "/var/lib/zot",
+    "dedupe": true,
+    "gc": true,
+    "gcDelay": "1h",
+    "gcInterval": "24h"
+  }
+}
+```
+
+For every `storage` setting, see the [storage overview](/v2.1.x/configuration/storage/overview#storage-settings).
+
+<Warning>
+  Deduplication on local storage uses hard links, so it needs a filesystem that supports them.
+</Warning>
+
+## Dedupe cache
+
+Local storage uses [BoltDB](/v2.1.x/configuration/storage/cache-drivers#boltdb) by default, stored at `<rootDirectory>/cache.db`. A single BoltDB file doesn't allow concurrent writers, so you can't run multiple zot instances against it. For a shared setup, use [Redis](/v2.1.x/configuration/storage/cache-drivers#redis).
+
+## Serve multiple storage paths
+
+Use `subPaths` to serve several filesystems, each with its own repository prefix and settings. In this example, repositories under `/a`, `/b`, and `/c` are stored in separate directories:
+
+```json
+{
+  "storage": {
+    "rootDirectory": "/var/lib/zot",
+    "subPaths": {
+      "/a": {
+        "rootDirectory": "/tmp/zot1",
+        "dedupe": true,
+        "gc": true
+      },
+      "/b": {
+        "rootDirectory": "/tmp/zot2",
+        "dedupe": true
+      },
+      "/c": {
+        "rootDirectory": "/tmp/zot3",
+        "dedupe": false
+      }
+    }
+  }
+}
+```
+
+Subpaths tie separate filesystems and backends together behind one HTTP API. Clients see no difference in the interface or experience. This is useful for serving existing OCI images from different locations, or when you can only expand storage by adding backing stores.
+
+<Tip>
+  Each subpath can use a different storage driver. See [subpaths with remote storage](/v2.1.x/configuration/storage/cache-drivers#remote-storage-subpaths).
+</Tip>
+
+Settings such as `dedupe`, `gc`, `gcDelay`, `gcInterval`, `gcTimeWindow`, `hydrateBlobOnRead`, and `redirectBlobURL` can be set per subpath.
+
+## Host an existing OCI image layout
+
+Because storage is a standard OCI image layout, zot can serve directories that hold a valid layout even if another tool created them. See [Host an existing OCI image layout](/v2.1.x/configuration/storage/overview#host-an-existing-oci-image-layout).

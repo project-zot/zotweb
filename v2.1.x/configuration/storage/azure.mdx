@@ -1,0 +1,99 @@
+---
+title: "Azure Blob Storage"
+description: "Store zot images in Azure Blob Storage."
+icon: "cloud"
+---
+
+Configure Azure Blob Storage with the `storageDriver` attribute in the `storage` section.
+
+```json
+{
+  "storage": {
+    "rootDirectory": "/tmp/zot",
+    "storageDriver": {
+      "name": "azure",
+      "accountname": "myaccount",
+      "container": "zot-storage",
+      "rootdirectory": "/zot",
+      "credentials": {
+        "type": "default_credentials"
+      }
+    }
+  }
+}
+```
+
+The driver is based on the distribution v3 Azure driver and follows the same remote-storage model as S3 and GCS. With deduplication on, remote storage needs a [cache driver](/v2.1.x/configuration/storage/cache-drivers). Azure is typically paired with Redis.
+
+## Driver settings
+
+<ParamField path="name" type="string" required>
+  `azure`.
+</ParamField>
+<ParamField path="accountname" type="string" required>
+  The Azure storage account name.
+</ParamField>
+<ParamField path="container" type="string" required>
+  The blob container that stores registry data.
+</ParamField>
+<ParamField path="rootdirectory" type="string" default="/zot">
+  A prefix applied to blob keys. zot uses `/zot` if you leave it unset, empty, or `/`.
+</ParamField>
+<ParamField path="credentials.type" type="string" required>
+  The authentication method: `shared_key`, `client_secret`, or `default_credentials`. See [authentication methods](#authentication-methods).
+</ParamField>
+<ParamField path="serviceurl" type="string">
+  Service URL. Defaults to `https://<accountname>.blob.<realm>`.
+</ParamField>
+<ParamField path="realm" type="string">
+  The Azure cloud domain used to build the default service URL. Set it for sovereign clouds.
+</ParamField>
+<ParamField path="max_retries" type="integer">
+  Maximum retries for failed requests.
+</ParamField>
+<ParamField path="retry_delay" type="string">
+  Delay between retries, as a duration.
+</ParamField>
+<ParamField path="skipverify" type="boolean">
+  Skip TLS verification.
+</ParamField>
+
+## Authentication methods
+
+<Tabs>
+  <Tab title="default_credentials (recommended)">
+    Uses Azure's default credential resolution, for example managed identity or Azure Workload Identity. No secrets in the configuration file.
+
+    ```json
+    "credentials": { "type": "default_credentials" }
+    ```
+  </Tab>
+  <Tab title="client_secret">
+    Uses a service principal.
+
+    ```json
+    "credentials": {
+      "type": "client_secret",
+      "clientid": "<client-id>",
+      "tenantid": "<tenant-id>",
+      "secret": "<client-secret>"
+    }
+    ```
+  </Tab>
+  <Tab title="shared_key">
+    Uses account key authentication. Provide the key with `accountkey`.
+
+    ```json
+    "accountkey": "<storage-account-key>",
+    "credentials": { "type": "shared_key" }
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+  `client_secret` and `shared_key` put secrets in the configuration file. Prefer `default_credentials`, or restrict the file's permissions.
+</Warning>
+
+<Tip>
+  Azure supports [redirecting blob pulls to signed backend URLs](/v2.1.x/configuration/storage/s3#redirect-blob-pulls-to-backend-urls) with `redirectBlobURL`.
+</Tip>

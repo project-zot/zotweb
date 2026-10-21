@@ -1,0 +1,139 @@
+---
+title: "Extension endpoints"
+description: "zot endpoints that aren't in the OpenAPI spec: login, token exchange, profiling, metrics, and health checks."
+icon: "puzzle-piece"
+---
+
+The [endpoint reference](/api-reference/registry/check-api-support) is generated from the swagger file that ships with zot. It covers the OCI endpoints, API keys, logout, and the `mgmt`, `userprefs`, `notation`, and `cosign` extension endpoints. This page documents the endpoints it leaves out. See the [API overview](/v2.1.x/api-reference/introduction) for when each one is available.
+
+## Login and callback
+
+These endpoints serve the OpenID and OAuth2 sign-in flow for the web UI. They exist when an [OpenID or OAuth2 provider](/v2.1.x/security/openid) is configured. You rarely call them yourself.
+
+### Login
+
+<ParamField path="/zot/auth/login" type="GET">
+  Start sign-in with a provider. zot saves state in a cookie and redirects the browser to the provider.
+</ParamField>
+
+<ParamField query="provider" type="string" required>
+  The provider name from `http.auth.openid.providers`, for example `github` or `oidc`. An unknown provider returns `400`.
+</ParamField>
+<ParamField query="callback_ui" type="string">
+  Where to send the browser after sign-in. zot accepts only origins in `http.externalUrl` or `http.auth.openid.callbackAllowOrigins`. Other values are ignored.
+</ParamField>
+
+```bash
+# Open this URL in a browser
+https://registry.example.com/zot/auth/login?provider=github
+```
+
+### Callback
+
+<ParamField path="/zot/auth/callback/{provider}" type="GET">
+  The provider redirects the browser here after sign-in. zot checks the state, creates a session cookie, and redirects to the UI. Register this URL as the redirect URI with your provider. See [OpenID Connect](/v2.1.x/security/openid).
+</ParamField>
+
+## Token endpoint
+
+<ParamField path="/zot/auth/token" type="GET | POST">
+  Exchange a credential for a bearer token that you then send on registry requests. It exists when bearer authentication is configured with OIDC, or with API keys enabled. See [Authentication](/v2.1.x/security/authentication) for how the methods combine.
+</ParamField>
+
+When this endpoint exists, an unauthenticated registry request returns a `Bearer` challenge that points here. Clients such as Docker and containerd follow it automatically.
+
+Send a credential in one of these ways:
+
+- An `Authorization: Basic` header. The password is the OIDC token or an [API key](/v2.1.x/security/api-keys). For an OIDC token, the username is ignored.
+- An `Authorization: Bearer` header with an OIDC token.
+- For `POST`, a form body (`application/x-www-form-urlencoded`) with `password` and an optional `username` or `account`, or one of `id_token`, `access_token`, `refresh_token`, or `token`.
+
+```bash
+curl -u user:zak_<key> "https://registry.example.com/zot/auth/token"
+```
+
+<ResponseField name="token" type="string">
+  The bearer token.
+</ResponseField>
+<ResponseField name="access_token" type="string">
+  The same token, for clients that read this field.
+</ResponseField>
+<ResponseField name="expires_in" type="integer">
+  Lifetime in seconds, when known.
+</ResponseField>
+<ResponseField name="issued_at" type="string">
+  Issue time, when known.
+</ResponseField>
+
+Responses carry `Cache-Control: no-store`. Invalid credentials return `401`, a malformed form returns `400`, and an oversized body returns `413`.
+
+<Note>
+  The `/zot/auth/token` endpoint never forwards zot-issued API keys to an upstream token service.
+</Note>
+
+## Trust store uploads
+
+`POST /v2/_zot/ext/notation` and `POST /v2/_zot/ext/cosign` are in the [endpoint reference](/api-reference/extensions/upload-cosign-public-keys-for-verifying-signatures). Two behaviors matter when you automate them:
+
+- **Admin only.** When authentication is enabled, only users matched by `accessControl.adminPolicy` can call them. Without an admin policy, other authenticated users get `403`. This applies from v2.1.22. See [Access control](/v2.1.x/security/access-control).
+- **Size limit.** The request body can be up to 8 MiB.
+
+The `notation` endpoint takes the optional query parameter `truststoreType`, which defaults to `ca`. An invalid type or certificate returns `400`. See [Verify image signatures](/v2.1.x/security/signatures) for the full workflow.
+
+## Profiling
+
+<ParamField path="/v2/_zot/pprof/" type="GET">
+  An HTML index of the available Go profiles. Each profile is at `/v2/_zot/pprof/{name}`.
+</ParamField>
+
+| Profile | Description |
+|---|---|
+| `allocs` | A sample of all past memory allocations |
+| `block` | Stack traces that led to blocking on synchronization primitives |
+| `cmdline` | The command line of the running program |
+| `goroutine` | Stack traces of all current goroutines. Add `debug=2` for panic-style output. |
+| `heap` | A sample of live object allocations. Add `gc` to run a garbage collection first. |
+| `mutex` | Stack traces of holders of contended mutexes |
+| `profile` | A CPU profile. Set the duration with `seconds`. |
+| `threadcreate` | Stack traces that led to new OS threads |
+| `trace` | An execution trace. Set the duration with `seconds`. |
+
+```bash
+curl -u admin:<password> -o cpu.prof "http://localhost:5000/v2/_zot/pprof/profile?seconds=30"
+go tool pprof cpu.prof
+```
+
+<Warning>
+  Profiling endpoints are admin-only when authentication is enabled. With no authentication configured, anyone who can reach the registry can read them. The endpoints exist only in binaries built with the `profile` label. See [Profile performance](/v2.1.x/operations/profiling).
+</Warning>
+
+## Metrics
+
+<ParamField path="/metrics" type="GET">
+  Prometheus metrics. The path is set by `extensions.metrics.prometheus.path` and defaults to `/metrics` in the examples. It exists when the `metrics` extension is enabled. See [Monitoring](/v2.1.x/operations/monitoring) for the metric names and for how access is controlled.
+</ParamField>
+
+## Health checks
+
+<ParamField path="/livez" type="GET">
+  Whether the process is alive.
+</ParamField>
+<ParamField path="/readyz" type="GET">
+  Whether zot is ready to serve requests.
+</ParamField>
+<ParamField path="/startupz" type="GET">
+  Whether startup has finished. Useful for slow starts, such as a first CVE database download.
+</ParamField>
+
+Each returns a `2xx` response when healthy and a non-success status otherwise. They're registered outside the authentication middleware. You can also call them with `zot healthcheck`. See [Health checks](/v2.1.x/install/linux#health-checks).
+
+## Debug endpoints
+
+Binaries built with the `debug` label (the `binary-debug` target) add two browser endpoints for developers:
+
+- `/swagger/v2/`: an interactive view of the swagger file.
+- `/v2/_zot/debug/graphql-playground`: an interactive GraphQL environment. See [Search with GraphQL](/v2.1.x/use/search-graphql).
+
+## Cross-origin requests
+
+Most endpoints answer `OPTIONS` preflight requests so the web UI can call them from another origin. The allowed origin is set by `http.allowOrigin`. See [HTTP and TLS](/v2.1.x/configuration/http).

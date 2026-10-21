@@ -1,0 +1,92 @@
+---
+title: "Build a CI/CD pipeline"
+description: "Build, store, sign, deploy, and verify container images in an OCI-native pipeline with zot."
+icon: "code-branch"
+---
+
+This tutorial walks through an OCI-native, secure container image pipeline. Each stage uses an open-source tool that speaks OCI standards, with zot as the registry in the middle.
+
+| Stage | Tool | Role |
+|---|---|---|
+| Build | [stacker](https://github.com/project-stacker/stacker) | Builds OCI images from a declarative YAML file |
+| Distribute | zot | Vendor-neutral OCI registry |
+| Registry client | [skopeo](https://github.com/containers/skopeo) | Copies images to and from the registry |
+| Sign and verify | [cosign](https://github.com/sigstore/cosign) | Signs images and verifies signatures |
+| Deploy | [cri-o](https://github.com/cri-o/cri-o) with Kubernetes | Runs the images |
+| Admission control | Sigstore admission controller | Validates images before they deploy |
+
+<Frame caption="Source code flows through build, distribution, and deployment, with signing and verification around the registry.">
+  <img src="/images/ci-cd-pipeline.jpg" alt="Pipeline diagram: a developer's source code is built by stacker into OCI images, distributed through zot, and deployed on Kubernetes with cri-o. cosign signs images at the registry and verifies them at deployment." style={{ maxWidth: "560px" }} />
+</Frame>
+
+<Info>
+  These tools are examples. Any client that speaks the OCI Distribution Specification works with zot. See [Client compatibility](/v2.1.x/clients/compatibility).
+</Info>
+
+## Build images
+
+stacker builds an image from a declarative YAML file. The output is an image in an OCI layout.
+
+```bash
+stacker build -f <stackerfile.yaml>
+```
+
+## Publish to the registry
+
+<Tabs>
+  <Tab title="stacker">
+    If stacker built the image, it can publish it:
+
+    ```bash
+    stacker publish --url <url> --username <user> --password <password>
+    ```
+  </Tab>
+  <Tab title="skopeo">
+    Copy an image from a local OCI layout to zot:
+
+    ```bash
+    skopeo copy --format=oci oci:<oci-dir>/image:tag \
+      docker://<zot-server>/image:tag
+    ```
+
+    See [Push and pull images](/v2.1.x/use/push-pull) for more skopeo, regclient, crane, and oras examples.
+  </Tab>
+</Tabs>
+
+<Warning>
+  Avoid putting passwords on the command line in CI. Use your CI system's secret store and a non-interactive login. See [Authentication](/v2.1.x/security/authentication).
+</Warning>
+
+## Sign images
+
+cosign generates a key pair and signs the image in the registry.
+
+```bash
+cosign generate-key-pair
+cosign sign --key cosign.key <zot-server>/image:tag
+```
+
+zot can verify these signatures and show which images are signed. See [Verify image signatures](/v2.1.x/security/signatures). For a complete walkthrough with artifacts, see [Software provenance workflow](/v2.1.x/guides/provenance-workflow).
+
+## Deploy images
+
+Kubernetes with cri-o pulls images from zot over the default `docker://` transport. Reference the image in your pod spec:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: example-pod
+spec:
+  containers:
+    - name: example-container
+      image: <zot-server>/image:tag
+```
+
+## Verify images before deployment
+
+An admission controller checks signatures before the cluster runs an image. The original `cosigned` controller has been superseded by the Sigstore [policy-controller](https://docs.sigstore.dev/policy-controller/overview/). Follow the Sigstore documentation to install it and write a policy that requires your public key.
+
+<Tip>
+  Combine this with zot's own checks: [signature verification](/v2.1.x/security/signatures), [immutable tags](/v2.1.x/security/immutable-tags), and [CVE scanning](/v2.1.x/security/cve-scanning).
+</Tip>

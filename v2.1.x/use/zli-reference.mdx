@@ -1,0 +1,254 @@
+---
+title: "zli command reference"
+description: "Every zli command, subcommand, and flag, with usage and sorting options."
+icon: "list"
+---
+
+This reference lists every `zli` command. For task-oriented examples, see [zli command line](/v2.1.x/use/zli). Run `zli <command> --help` to see the help for your installed version.
+
+```text
+zli [flags]
+zli [command]
+```
+
+| Command | Description |
+|---|---|
+| [`completion`](#zli-completion) | Generate shell autocompletion scripts |
+| [`config`](#zli-config) | Manage saved registry profiles |
+| [`cve`](#zli-cve) | Look up CVEs in images |
+| [`image`](#zli-image) | List and inspect images |
+| [`repo`](#zli-repo) | List repositories |
+| [`search`](#zli-search) | Search repositories and images, and list referrers |
+| [`status`](#zli-status) | Show server configuration and build information |
+
+<ParamField path="-h, --help" type="boolean">
+  Show help for `zli` or any command.
+</ParamField>
+<ParamField path="-v, --version" type="boolean">
+  Show the version and exit.
+</ParamField>
+
+## Connection flags
+
+Every command except `config` and `completion` connects to a registry and accepts these flags. `zli status` takes `-c` as the short form of `--config`.
+
+<ParamField path="--config" type="string">
+  Name of a saved profile to connect with. See [`zli config`](#zli-config).
+</ParamField>
+<ParamField path="--url" type="string">
+  Server URL to use when you aren't naming a profile.
+</ParamField>
+<ParamField path="-u, --user" type="string">
+  Credentials in `username:password` form.
+</ParamField>
+<ParamField path="--debug" type="boolean">
+  Show debug output. Not available on `status`.
+</ParamField>
+<ParamField path="-f, --format" type="string">
+  Output format: `text`, `json`, or `yaml`. Available on `cve`, `image`, `search`, and `status`. Not available on `repo`.
+</ParamField>
+<ParamField path="--verbose" type="boolean">
+  Show verbose output. Available on `cve`, `image`, and `search`.
+</ParamField>
+
+<Note>
+  If you pass neither `--config` nor `--url`, zli uses the default profile set with `zli config set-default`. Without a default, the command fails. An explicit `--config` or `--url` always wins over the default.
+</Note>
+
+## Sort options
+
+Subcommands that print lists accept `--sort-by`. Valid values and defaults vary:
+
+| Option | Meaning |
+|---|---|
+| `alpha-asc` | Alphabetical, ascending |
+| `alpha-dsc` | Alphabetical, descending |
+| `relevance` | Quality of match |
+| `severity` | Severity of the condition |
+| `update-time` | Last update time |
+
+## zli completion
+
+Generate the autocompletion script for the specified shell. Each subcommand's help explains how to load the generated script.
+
+```bash
+zli completion bash
+zli completion zsh
+zli completion fish
+zli completion powershell
+```
+
+## zli config
+
+Manage saved registry profiles. Profiles are stored as JSON in `~/.zot`.
+
+```text
+zli config <subcommand> [arguments]
+```
+
+| Subcommand | Usage | Description |
+|---|---|---|
+| `add` | `zli config add <config-name> <url>` | Add a profile for a zot registry |
+| `list` | `zli config list` | List all profile names, with their URLs |
+| `show` | `zli config show <name>` | Show every variable of one profile |
+| `get` | `zli config get <name> <key>` | Print one variable |
+| `set` | `zli config set <name> <key> <value>` | Set one variable and save it |
+| `reset` | `zli config reset <name> <key>` | Remove a non-default variable. You can't reset `url` or the profile name. |
+| `remove` | `zli config remove <config-name>` | Delete a profile. Removing the default profile clears the default. |
+| `set-default` | `zli config set-default <name>` | Use this profile when neither `--url` nor `--config` is given |
+| `clear-default` | `zli config clear-default` | Clear the default profile |
+
+Profile variables:
+
+| Variable | Description |
+|---|---|
+| `url` | zot server URL |
+| `showspinner` | Show a spinner while loading data (`true` or `false`) |
+| `verify-tls` | Verify the server's TLS certificate. Default `true`. |
+
+Profile names can't be the same as a subcommand name (`add`, `clear-default`, `get`, `list`, `remove`, `reset`, `set`, `set-default`, `show`).
+
+```bash
+zli config add main https://zot-foo.com:8080
+zli config list
+zli config show main
+zli config get main url
+zli config set main showspinner false
+zli config reset main showspinner
+zli config set-default main
+zli config clear-default
+zli config remove main
+```
+
+<Warning>
+  The flags `-l, --list` and `--reset`, and the positional form `zli config <name> [variable] [value]`, are deprecated and will be removed. Use the subcommands above.
+</Warning>
+
+## zli cve
+
+List CVEs (Common Vulnerabilities and Exposures) of images. Requires [CVE scanning](/v2.1.x/security/cve-scanning) on the server.
+
+Flags: the [connection flags](#connection-flags), `-f, --format`, and `--verbose`.
+
+| Subcommand | Usage | Description |
+|---|---|---|
+| `list` | `zli cve list [repo:tag]\|[repo@digest]` | List CVEs of an image |
+| `affected` | `zli cve affected [cveId]` | List images affected by a CVE |
+| `fixed` | `zli cve fixed [repo] [cveId]` | List tags where a CVE is fixed |
+| `diff` | `zli cve diff [minuend] ([minuend-platform]) [subtrahend] ([subtrahend-platform])` | List the CVEs in the first image that aren't in the second |
+
+<ParamField path="--cve-id" type="string">
+  `cve list` only. Show only the CVE with this ID.
+</ParamField>
+<ParamField path="--repo" type="string">
+  `cve affected` only. Limit results to one repository.
+</ParamField>
+<ParamField path="--sort-by" type="string">
+  `cve list`: `alpha-asc`, `alpha-dsc`, or `severity` (default `severity`). `cve affected` and `cve fixed`: `update-time`, `alpha-asc`, or `alpha-dsc` (default `alpha-asc`). `cve diff` has no `--sort-by`.
+</ParamField>
+
+For multi-architecture images, `cve diff` accepts a platform such as `linux/amd64` after each image.
+
+## zli image
+
+List images hosted on the registry.
+
+Flags: the [connection flags](#connection-flags), `-f, --format`, and `--verbose`.
+
+| Subcommand | Usage | Description |
+|---|---|---|
+| `list` | `zli image list` | List all images |
+| `name` | `zli image name [repo:tag]` | Show image details by name |
+| `digest` | `zli image digest [digest]` | List images that contain a blob (manifest, config, or layer) with this digest. A short digest prefix works, such as `8a1930f0`. |
+| `base` | `zli image base [repo-name:tag]\|[repo-name@digest]` | List images that are a base of the given image |
+| `derived` | `zli image derived [repo-name:tag]\|[repo-name@digest]` | List images derived from the given image |
+| `cve` | `zli image cve [repo]\|[repo-name:tag]\|[repo-name@digest]` | List all CVEs of an image |
+
+<ParamField path="--sort-by" type="string" default="alpha-asc">
+  `list`, `name`, `digest`, `base`, and `derived`: `update-time`, `alpha-asc`, or `alpha-dsc`. `image cve`: `alpha-asc`, `alpha-dsc`, or `severity` (default `severity`).
+</ParamField>
+<ParamField path="--cve-id" type="string">
+  `image cve` only. Show only the CVE with this ID.
+</ParamField>
+
+## zli repo
+
+List repositories.
+
+Flags: the [connection flags](#connection-flags). The `repo` command has no `-f, --format` or `--verbose`.
+
+| Subcommand | Usage | Description |
+|---|---|---|
+| `list` | `zli repo list` | List all repositories |
+
+<ParamField path="--sort-by" type="string" default="alpha-asc">
+  `alpha-asc` or `alpha-dsc`.
+</ParamField>
+
+## zli search
+
+Search repositories and images.
+
+Flags: the [connection flags](#connection-flags), `-f, --format`, and `--verbose`.
+
+<AccordionGroup>
+  <Accordion title="zli search query" defaultOpen>
+    Fuzzy search for repositories and their tags.
+
+    ```text
+    zli search query [repo]|[repo:tag] [flags]
+    ```
+
+    - For a **repository** search, give a substring of the repository name without a tag.
+    - For an **image** search, give the full repository name followed by a colon and a tag or tag prefix.
+
+    ```bash
+    # Repository search
+    zli search query "test/repo"
+
+    # Image search
+    zli search query "test/repo:2.1."
+    ```
+
+    <ParamField path="--sort-by" type="string" default="relevance">
+      `relevance`, `update-time`, `alpha-asc`, or `alpha-dsc`.
+    </ParamField>
+  </Accordion>
+  <Accordion title="zli search subject">
+    List all referrers of a subject, such as signatures and SBOMs. Identify the subject by tag (`repo:tag`) or by digest (`repo@digest`).
+
+    ```text
+    zli search subject [repo:tag]|[repo@digest] [flags]
+    ```
+
+    ```bash
+    zli search subject "repo:tag"
+    zli search subject "repo@sha256:f9a0981..."
+    ```
+
+    <ParamField path="--sort-by" type="string" default="alpha-asc">
+      `update-time`, `alpha-asc`, or `alpha-dsc`.
+    </ParamField>
+  </Accordion>
+</AccordionGroup>
+
+## zli status
+
+Show information about the server configuration and build.
+
+```text
+zli status [flags]
+```
+
+<ParamField path="-c, --config" type="string">
+  Profile to connect with.
+</ParamField>
+<ParamField path="--url" type="string">
+  Server URL.
+</ParamField>
+<ParamField path="-u, --user" type="string">
+  Credentials in `username:password` form.
+</ParamField>
+<ParamField path="-f, --format" type="string" default="text">
+  Output format: `text`, `json`, or `yaml`.
+</ParamField>

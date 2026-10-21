@@ -1,0 +1,207 @@
+---
+title: "Monitoring"
+description: "Watch zot with logs, Prometheus metrics, and health endpoints."
+icon: "chart-line"
+---
+
+zot gives you three signals: structured logs, Prometheus metrics, and health endpoints. You can also load-test a deployment with the [`zb` benchmarking tool](/v2.1.x/operations/benchmarking-zb).
+
+## Logs
+
+zot writes structured JSON logs to standard output or a file, and can write a separate audit log. Set the level, the output path, and the audit path in the `log` section. See [Logging](/v2.1.x/configuration/logging) for all settings.
+
+## Health endpoints
+
+zot serves three unauthenticated probe endpoints on its HTTP listener:
+
+| Endpoint | Returns `2xx` when |
+|---|---|
+| `/livez` | The process is up and serving requests. |
+| `/readyz` | zot has finished starting and is ready for traffic. |
+| `/startupz` | Startup has completed. |
+
+Before startup finishes, `/readyz` and `/startupz` return an error. Use them for Kubernetes probes or load-balancer checks. From a shell, or in a distroless container without `curl`, use `zot healthcheck`:
+
+```bash
+zot healthcheck /etc/zot/config.json
+zot healthcheck --endpoint livez /etc/zot/config.json
+```
+
+See [Install on Linux](/v2.1.x/install/linux#health-checks) for all options.
+
+## Metrics
+
+zot exposes metrics in Prometheus format. How you collect them depends on the image you run.
+
+<Tabs>
+  <Tab title="Full image">
+    The full image has a built-in exporter, provided by the `metrics` extension. Enable it in the configuration file:
+
+    ```json
+    "extensions": {
+      "metrics": {
+        "enable": true,
+        "prometheus": {
+          "path": "/metrics"
+        }
+      }
+    }
+    ```
+
+    <ParamField path="extensions.metrics.enable" type="boolean" default="true">
+      Defaults to `true` when the `metrics` key is present. Set it to `false` to turn metrics off.
+    </ParamField>
+
+    <ParamField path="extensions.metrics.prometheus.path" type="string" default="/metrics">
+      The URL path that serves metrics. It must be a clean absolute path starting with `/`. Configuration validation rejects reserved and overly broad paths such as `/` and `/v2`.
+    </ParamField>
+
+    Point Prometheus at the zot listener:
+
+    ```yaml prometheus.yml
+    scrape_configs:
+      - job_name: zot
+        metrics_path: /metrics
+        static_configs:
+          - targets: ["zot.example.com:5000"]
+    ```
+  </Tab>
+  <Tab title="Minimal image (zxp)">
+    The minimal image has no exporter. It keeps internal metrics and exposes them to a separate exporter, `zxp`, which Prometheus then scrapes.
+
+    - zot turns metrics collection on at the first scrape by `zxp`.
+    - zot turns it off again if nothing has scraped for about two minutes.
+    - You need no extra zot configuration.
+
+    Download `zxp` from the **Assets** of a [release](https://github.com/project-zot/zot/releases), for example `zxp-linux-amd64`, or run the `ghcr.io/project-zot/zxp` image. Start it with a configuration file:
+
+    ```bash
+    zxp config /etc/zxp/config.json
+    ```
+
+    ```json /etc/zxp/config.json
+    {
+      "Server": {
+        "protocol": "http",
+        "host": "127.0.0.1",
+        "port": "8080"
+      },
+      "Exporter": {
+        "port": "8081",
+        "log": {
+          "level": "debug"
+        }
+      }
+    }
+    ```
+
+    <ParamField path="Server.protocol" type="string" default="http">
+      `http` or `https`, for the connection to zot.
+    </ParamField>
+    <ParamField path="Server.host" type="string" default="localhost">
+      The zot host to scrape.
+    </ParamField>
+    <ParamField path="Server.port" type="string" default="8080">
+      The zot port.
+    </ParamField>
+    <ParamField path="Server.CACert" type="string">
+      Path to a PEM CA certificate for verifying zot's TLS certificate. Needed for a self-signed or private CA.
+    </ParamField>
+    <ParamField path="Exporter.port" type="string" default="8081">
+      The port where `zxp` serves metrics to Prometheus.
+    </ParamField>
+    <ParamField path="Exporter.metrics.path" type="string" default="/metrics">
+      The path where `zxp` serves metrics.
+    </ParamField>
+    <ParamField path="Exporter.readTimeout / Exporter.writeTimeout" type="duration" default="30s">
+      Timeouts for the exporter's HTTP server.
+    </ParamField>
+    <ParamField path="Exporter.log" type="object">
+      `level` (default `debug`) and `output` (a file path; standard output if omitted).
+    </ParamField>
+
+    Point Prometheus at `zxp`, not at zot:
+
+    ```yaml prometheus.yml
+    scrape_configs:
+      - job_name: zot
+        static_configs:
+          - targets: ["zxp.example.com:8081"]
+    ```
+
+    A [Dockerfile for zxp](https://github.com/project-zot/zot/blob/main/build/Dockerfile-zxp) is in the zot repository. The `zxp` container image listens on port `5001` and reads `/etc/zxp/config.json`.
+
+    <Note>
+      You don't need `zxp` with the full image.
+    </Note>
+  </Tab>
+</Tabs>
+
+### Restrict who can read metrics
+
+Metrics honor [access control](/v2.1.x/security/access-control). To let an unauthenticated scraper such as Prometheus read them, allow anonymous `read` in the `metrics` policy:
+
+```json
+{
+  "http": {
+    "accessControl": {
+      "metrics": {
+        "users": ["prometheus"],
+        "anonymousPolicy": ["read"]
+      },
+      "repositories": {
+        "**": {
+          "defaultPolicy": ["read"]
+        }
+      }
+    }
+  },
+  "extensions": {
+    "metrics": {
+      "enable": true,
+      "prometheus": {
+        "path": "/metrics"
+      }
+    }
+  }
+}
+```
+
+- Unauthenticated requests are allowed when `anonymousPolicy` includes `read`.
+- Authenticated users listed in `metrics.users` are allowed.
+- Authenticated users that `metrics.users` doesn't list are denied, even when anonymous read is on.
+
+### Available metrics
+
+All metric names start with `zot_`.
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `zot_info` | gauge | `commit`, `binaryType`, `goVersion`, `version` | Build information about the running server. |
+| `zot_http_requests_total` | counter | `method`, `code` | HTTP requests served. |
+| `zot_http_method_latency_seconds` | histogram | `method` | Request latency by HTTP method. |
+| `zot_http_repo_latency_seconds` | summary | `repo` | Request latency by repository. |
+| `zot_repo_storage_bytes` | gauge | `repo` | Storage used by each repository. |
+| `zot_repo_uploads_total` | counter | `repo` | Times an image was uploaded. |
+| `zot_repo_downloads_total` | counter | `repo` | Times an image was downloaded. |
+| `zot_storage_lock_latency_seconds` | histogram | `storageName`, `lockType` | Time spent acquiring storage locks. |
+| `zot_scheduler_generators_total` | counter | none | Task generators registered in the scheduler. |
+| `zot_scheduler_generators_status` | gauge | `priority`, `state` | Task generators by priority and state. |
+| `zot_scheduler_workers_total` | gauge | none | Workers available to run scheduler tasks. |
+| `zot_scheduler_workers` | gauge | `state` | Scheduler workers by state. |
+| `zot_scheduler_tasksqueue_length` | gauge | `priority` | Tasks waiting in the queue. |
+| `zot_scheduler_workers_tasks_duration_seconds` | histogram | `name` | How long a worker takes to run a task. |
+| `zot_gc_runs_total` | counter | `error` | Garbage collection runs. |
+| `zot_gc_duration_seconds` | summary | none | Duration of garbage collection runs. |
+| `zot_gc_deleted_total` | counter | `type` | Items garbage collection deleted: `manifest`, `blob`, or `upload`. |
+
+Some starting points for alerts and dashboards:
+
+- **Error rate:** the share of `zot_http_requests_total` with a `code` of `5xx`. After v2.1.22, `503` means a transient storage failure and `500` a permanent one. See [Troubleshooting](/v2.1.x/operations/troubleshooting).
+- **Latency:** p99 of `zot_http_method_latency_seconds`.
+- **Capacity:** growth of `zot_repo_storage_bytes`.
+- **Background work:** `zot_scheduler_tasksqueue_length` that keeps growing means tasks such as GC or sync can't keep up.
+
+## Logs and metrics in Kubernetes
+
+In Kubernetes, collect logs from standard output with your cluster logging stack, or ship a log file with a tool such as [Filebeat](https://www.elastic.co/beats/filebeat). Use `/readyz` and `/startupz` for probes. See [Install on Kubernetes with Helm](/v2.1.x/install/kubernetes-helm).

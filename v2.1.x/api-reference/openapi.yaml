@@ -1,0 +1,1713 @@
+openapi: 3.0.3
+info:
+  title: zot registry API
+  version: v1.1.1
+  description: 'The HTTP API of the zot registry: the OCI Distribution Specification endpoints plus zot''s authentication
+    and extension endpoints.
+
+
+    This reference is generated from the swagger file that ships with zot. Endpoints it doesn''t cover, such as GraphQL search,
+    login, and the token endpoint, are described in the hand-written pages of this section.
+
+
+    Repository names can contain slashes, for example `library/alpine`. Send them unencoded in the path when you call the
+    API directly.
+
+
+    Authentication is optional unless you configure it. With mutual TLS, the client certificate authenticates the connection,
+    so no header is needed. OpenAPI 3.0 can''t describe that scheme.'
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+paths:
+  /v2/:
+    get:
+      description: 'Check whether the registry implements the OCI Distribution API. A `200` response includes the `Docker-Distribution-API-Version:
+        registry/2.0` header. When authentication is required, the registry returns `401` with a `WWW-Authenticate` challenge
+        (`Basic` or `Bearer`), which clients use to discover how to authenticate.'
+      responses:
+        '200':
+          description: The registry supports the API.
+          headers:
+            Docker-Distribution-API-Version:
+              schema:
+                type: string
+                example: registry/2.0
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Check API support
+      tags:
+      - Registry
+      operationId: get_v2
+  /v2/_catalog:
+    get:
+      description: List all image repositories
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/api.RepositoryList'
+          headers:
+            Link:
+              description: When more results exist, a `rel="next"` link to the next page.
+              schema:
+                type: string
+        '500':
+          description: internal server error
+          content:
+            application/json:
+              schema:
+                type: string
+        '503':
+          description: storage temporarily unavailable
+          content:
+            application/json:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: List image repositories
+      tags:
+      - Registry
+      operationId: get_v2__catalog
+      parameters:
+      - name: n
+        in: query
+        required: false
+        description: Maximum number of repositories to return.
+        schema:
+          type: integer
+      - name: last
+        in: query
+        required: false
+        description: Return repositories after this one, in lexical order.
+        schema:
+          type: string
+  /v2/_oci/ext/discover:
+    get:
+      description: List all extensions present on registry
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/api.ExtensionList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: List Registry level extensions
+      tags:
+      - Registry
+      operationId: get_v2__oci_ext_discover
+  /v2/_zot/ext/cosign:
+    post:
+      description: Upload cosign public keys for verifying signatures. When authentication is enabled, only users matched
+        by `accessControl.adminPolicy` can call this endpoint. Other callers get `403`. See [Extension endpoints](/api-reference/extensions).
+      requestBody:
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+        description: Public key content
+        required: true
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: string
+        '400':
+          description: bad request
+          content:
+            application/json:
+              schema:
+                type: string
+        '413':
+          description: request entity too large
+          content:
+            application/json:
+              schema:
+                type: string
+        '500':
+          description: internal server error
+          content:
+            application/json:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Upload cosign public keys for verifying signatures
+      tags:
+      - Extensions
+      operationId: post_v2__zot_ext_cosign
+  /v2/_zot/ext/mgmt:
+    get:
+      description: Get current server configuration
+      parameters:
+      - description: specify resource
+        in: query
+        name: resource
+        schema:
+          type: string
+          enum:
+          - config
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/extensions.StrippedConfig'
+        '500':
+          description: internal server error
+          content:
+            application/json:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Get current server configuration
+      tags:
+      - Extensions
+      operationId: get_v2__zot_ext_mgmt
+  /v2/_zot/ext/notation:
+    post:
+      description: Upload notation certificates for verifying signatures. When authentication is enabled, only users matched
+        by `accessControl.adminPolicy` can call this endpoint. Other callers get `403`. See [Extension endpoints](/api-reference/extensions).
+      parameters:
+      - description: Notation trust store type. Defaults to `ca`.
+        in: query
+        name: truststoreType
+        schema:
+          type: string
+          default: ca
+      requestBody:
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+        description: Certificate content
+        required: true
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: string
+        '400':
+          description: bad request
+          content:
+            application/json:
+              schema:
+                type: string
+        '413':
+          description: request entity too large
+          content:
+            application/json:
+              schema:
+                type: string
+        '500':
+          description: internal server error
+          content:
+            application/json:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Upload notation certificates for verifying signatures
+      tags:
+      - Extensions
+      operationId: post_v2__zot_ext_notation
+  /v2/_zot/ext/userprefs:
+    put:
+      description: Add bookmarks/stars info
+      parameters:
+      - description: specify action
+        in: query
+        name: action
+        required: true
+        schema:
+          type: string
+          enum:
+          - toggleBookmark
+          - toggleStar
+      - description: repository name
+        in: query
+        name: repo
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: string
+        '400':
+          description: bad request".
+          content:
+            application/json:
+              schema:
+                type: string
+        '403':
+          description: forbidden
+          content:
+            application/json:
+              schema:
+                type: string
+        '404':
+          description: not found
+          content:
+            application/json:
+              schema:
+                type: string
+        '500':
+          description: internal server error
+          content:
+            application/json:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      summary: Add bookmarks/stars info
+      tags:
+      - Extensions
+      operationId: put_v2__zot_ext_userprefs
+  /v2/{name}/blobs/{digest}:
+    delete:
+      description: Delete an image's blob/layer given a digest
+      parameters:
+      - description: Repository name. It can contain slashes, for example `library/alpine`.
+        in: path
+        name: name
+        required: true
+        schema: &id001
+          type: string
+      - description: blob/layer digest
+        in: path
+        name: digest
+        required: true
+        schema:
+          type: string
+      responses:
+        '202':
+          description: accepted
+        '404':
+          description: not found
+          content:
+            application/json:
+              schema:
+                type: string
+        '405':
+          description: method not allowed
+          content:
+            application/json:
+              schema:
+                type: string
+        '500':
+          description: internal server error
+          content:
+            application/json:
+              schema:
+                type: string
+        '503':
+          description: storage temporarily unavailable
+          content:
+            application/json:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Delete image blob/layer
+      tags:
+      - Blobs
+      operationId: delete_v2_name_blobs_digest
+    get:
+      description: Get an image's blob/layer given a digest
+      parameters:
+      - description: Repository name. It can contain slashes, for example `library/alpine`.
+        in: path
+        name: name
+        required: true
+        schema: *id001
+      - description: blob/layer digest
+        in: path
+        name: digest
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: The blob content.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+          headers:
+            Accept-Ranges:
+              schema:
+                type: string
+                example: bytes
+            Docker-Content-Digest:
+              schema:
+                type: string
+        '400':
+          description: bad request
+          content:
+            application/json:
+              schema:
+                type: string
+            application/octet-stream:
+              schema:
+                type: string
+        '404':
+          description: not found
+          content:
+            application/json:
+              schema:
+                type: string
+            application/octet-stream:
+              schema:
+                type: string
+        '500':
+          description: internal server error
+          content:
+            application/json:
+              schema:
+                type: string
+            application/octet-stream:
+              schema:
+                type: string
+        '503':
+          description: storage temporarily unavailable
+          content:
+            application/json:
+              schema:
+                type: string
+            application/octet-stream:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Get image blob/layer
+      tags:
+      - Blobs
+      operationId: get_v2_name_blobs_digest
+    head:
+      description: Check an image's blob/layer given a digest
+      parameters:
+      - description: Repository name. It can contain slashes, for example `library/alpine`.
+        in: path
+        name: name
+        required: true
+        schema: *id001
+      - description: blob/layer digest
+        in: path
+        name: digest
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          headers:
+            Docker-Content-Digest:
+              description: Manifest digest of the content
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/api.ImageManifest'
+            application/octet-stream:
+              schema:
+                $ref: '#/components/schemas/api.ImageManifest'
+        '400':
+          description: bad request
+          content:
+            application/json:
+              schema:
+                type: string
+            application/octet-stream:
+              schema:
+                type: string
+        '404':
+          description: not found
+          content:
+            application/json:
+              schema:
+                type: string
+            application/octet-stream:
+              schema:
+                type: string
+        '500':
+          description: internal server error
+          content:
+            application/json:
+              schema:
+                type: string
+            application/octet-stream:
+              schema:
+                type: string
+        '503':
+          description: storage temporarily unavailable
+          content:
+            application/json:
+              schema:
+                type: string
+            application/octet-stream:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Check image blob/layer
+      tags:
+      - Blobs
+      operationId: head_v2_name_blobs_digest
+  /v2/{name}/blobs/uploads/:
+    post:
+      description: 'Create a new image blob/layer upload. With no query parameters, starts an upload session
+
+        and returns 202.
+
+        A `digest` query parameter requests a monolithic upload and returns 201 on success.
+
+        A `mount` query parameter requests a cross-repository blob mount and returns 201 or 202.'
+      parameters:
+      - description: Repository name. It can contain slashes, for example `library/alpine`.
+        in: path
+        name: name
+        required: true
+        schema: *id001
+      - description: blob digest for monolithic upload
+        in: query
+        name: digest
+        schema:
+          type: string
+      - description: blob digest to mount into the repository
+        in: query
+        name: mount
+        schema:
+          type: string
+      responses:
+        '201':
+          description: created
+          headers:
+            Blob-Upload-UUID:
+              description: Opaque blob upload session identifier
+              schema:
+                type: string
+            Location:
+              description: /v2/{name}/blobs/{digest}
+              schema:
+                type: string
+        '202':
+          description: accepted
+          headers:
+            Location:
+              description: /v2/{name}/blobs/uploads/{session_id}
+              schema:
+                type: string
+            Range:
+              description: 0-0
+              schema:
+                type: string
+        '400':
+          description: bad request (invalid digest or upload)
+          content:
+            application/json:
+              schema:
+                type: string
+        '401':
+          description: unauthorized
+          content:
+            application/json:
+              schema:
+                type: string
+        '404':
+          description: not found
+          content:
+            application/json:
+              schema:
+                type: string
+        '415':
+          description: unsupported media type (monolithic upload requires application/octet-stream)
+          content:
+            application/json:
+              schema:
+                type: string
+        '500':
+          description: internal server error
+          content:
+            application/json:
+              schema:
+                type: string
+        '503':
+          description: storage temporarily unavailable
+          content:
+            application/json:
+              schema:
+                type: string
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Create image blob/layer upload
+      tags:
+      - Blob uploads
+      operationId: post_v2_name_blobs_uploads
+  /v2/{name}/blobs/uploads/{session_id}:
+    delete:
+      description: Delete an image's blob/layer given a digest
+      parameters:
+      - description: Repository name. It can contain slashes, for example `library/alpine`.
+        in: path
+        name: name
+        required: true
+        schema: *id001
+      - description: upload session_id
+        in: path
+        name: session_id
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: no content
+        '404':
+          description: not found
+          content:
+            application/json:
+              schema:
+                type: string
+        '500':
+          description: internal server error
+          content:
+            application/json:
+              schema:
+                type: string
+        '503':
+          description: storage temporarily unavailable
+          content:
+            application/json:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Delete image blob/layer
+      tags:
+      - Blob uploads
+      operationId: delete_v2_name_blobs_uploads_session_id
+    get:
+      description: Get an image's blob/layer upload given a session_id
+      parameters:
+      - description: Repository name. It can contain slashes, for example `library/alpine`.
+        in: path
+        name: name
+        required: true
+        schema: *id001
+      - description: upload session_id
+        in: path
+        name: session_id
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: no content
+          headers:
+            Location:
+              description: /v2/{name}/blobs/uploads/{session_id}
+              schema:
+                type: string
+            Range:
+              description: 0-128
+              schema:
+                type: string
+        '400':
+          description: bad request
+          content:
+            application/json:
+              schema:
+                type: string
+        '404':
+          description: not found
+          content:
+            application/json:
+              schema:
+                type: string
+        '500':
+          description: internal server error
+          content:
+            application/json:
+              schema:
+                type: string
+        '503':
+          description: storage temporarily unavailable
+          content:
+            application/json:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Get image blob/layer upload
+      tags:
+      - Blob uploads
+      operationId: get_v2_name_blobs_uploads_session_id
+    patch:
+      description: Resume an image's blob/layer upload given an session_id
+      parameters:
+      - description: Repository name. It can contain slashes, for example `library/alpine`.
+        in: path
+        name: name
+        required: true
+        schema: *id001
+      - description: upload session_id
+        in: path
+        name: session_id
+        required: true
+        schema:
+          type: string
+      responses:
+        '202':
+          description: accepted
+          headers:
+            Blob-Upload-UUID:
+              description: Opaque blob upload session identifier
+              schema:
+                type: string
+            Location:
+              description: /v2/{name}/blobs/uploads/{session_id}
+              schema:
+                type: string
+            Range:
+              description: 0-128
+              schema:
+                type: string
+        '400':
+          description: bad request
+          content:
+            application/json:
+              schema:
+                type: string
+        '404':
+          description: not found
+          content:
+            application/json:
+              schema:
+                type: string
+        '416':
+          description: range not satisfiable
+          content:
+            application/json:
+              schema:
+                type: string
+        '500':
+          description: internal server error
+          content:
+            application/json:
+              schema:
+                type: string
+        '503':
+          description: storage temporarily unavailable
+          content:
+            application/json:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Resume image blob/layer upload
+      tags:
+      - Blob uploads
+      operationId: patch_v2_name_blobs_uploads_session_id
+      requestBody:
+        required: false
+        description: Blob bytes (the final chunk for `PUT`).
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+    put:
+      description: Update and finish an image's blob/layer upload given a digest
+      parameters:
+      - description: Repository name. It can contain slashes, for example `library/alpine`.
+        in: path
+        name: name
+        required: true
+        schema: *id001
+      - description: upload session_id
+        in: path
+        name: session_id
+        required: true
+        schema:
+          type: string
+      - description: blob/layer digest
+        in: query
+        name: digest
+        required: true
+        schema:
+          type: string
+      responses:
+        '201':
+          description: created
+          headers:
+            Docker-Content-Digest:
+              description: Digest of the committed blob
+              schema:
+                type: string
+            Location:
+              description: /v2/{name}/blobs/{digest}
+              schema:
+                type: string
+        '400':
+          description: bad request
+          content:
+            application/json:
+              schema:
+                type: string
+        '404':
+          description: not found
+          content:
+            application/json:
+              schema:
+                type: string
+        '416':
+          description: range not satisfiable
+          content:
+            application/json:
+              schema:
+                type: string
+        '500':
+          description: internal server error
+          content:
+            application/json:
+              schema:
+                type: string
+        '503':
+          description: storage temporarily unavailable
+          content:
+            application/json:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Update image blob/layer upload
+      tags:
+      - Blob uploads
+      operationId: put_v2_name_blobs_uploads_session_id
+      requestBody:
+        required: false
+        description: Blob bytes (the final chunk for `PUT`).
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+  /v2/{name}/manifests/{reference}:
+    delete:
+      description: Delete an image's manifest given a reference or a digest
+      parameters:
+      - description: Repository name. It can contain slashes, for example `library/alpine`.
+        in: path
+        name: name
+        required: true
+        schema: *id001
+      - description: image reference or digest
+        in: path
+        name: reference
+        required: true
+        schema:
+          type: string
+      responses:
+        '202':
+          description: accepted
+        '400':
+          description: bad request
+          content:
+            application/json:
+              schema:
+                type: string
+        '404':
+          description: not found
+          content:
+            application/json:
+              schema:
+                type: string
+        '405':
+          description: method not allowed
+          content:
+            application/json:
+              schema:
+                type: string
+        '409':
+          description: conflict
+          content:
+            application/json:
+              schema:
+                type: string
+        '500':
+          description: internal server error
+          content:
+            application/json:
+              schema:
+                type: string
+        '503':
+          description: storage temporarily unavailable
+          content:
+            application/json:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Delete image manifest
+      tags:
+      - Manifests
+      operationId: delete_v2_name_manifests_reference
+    get:
+      description: Get an image's manifest given a reference or a digest
+      parameters:
+      - description: Repository name. It can contain slashes, for example `library/alpine`.
+        in: path
+        name: name
+        required: true
+        schema: *id001
+      - description: image reference or digest
+        in: path
+        name: reference
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          headers:
+            Docker-Content-Digest:
+              description: Manifest digest of the content
+              schema:
+                type: string
+          content:
+            application/vnd.oci.image.manifest.v1+json:
+              schema:
+                $ref: '#/components/schemas/api.ImageManifest'
+            application/vnd.oci.image.index.v1+json:
+              schema:
+                $ref: '#/components/schemas/api.ImageIndex'
+        '404':
+          description: not found
+          content:
+            application/vnd.oci.image.manifest.v1+json:
+              schema:
+                type: string
+        '500':
+          description: internal server error
+          content:
+            application/vnd.oci.image.manifest.v1+json:
+              schema:
+                type: string
+        '503':
+          description: storage temporarily unavailable or synchronization failed
+          content:
+            application/vnd.oci.image.manifest.v1+json:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Get image manifest
+      tags:
+      - Manifests
+      operationId: get_v2_name_manifests_reference
+    head:
+      description: Check an image's manifest given a reference or a digest
+      parameters:
+      - description: Repository name. It can contain slashes, for example `library/alpine`.
+        in: path
+        name: name
+        required: true
+        schema: *id001
+      - description: image reference or digest
+        in: path
+        name: reference
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ok
+          headers:
+            Docker-Content-Digest:
+              description: Manifest digest of the content
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: string
+        '404':
+          description: not found
+          content:
+            application/json:
+              schema:
+                type: string
+        '500':
+          description: internal server error
+          content:
+            application/json:
+              schema:
+                type: string
+        '503':
+          description: storage temporarily unavailable or synchronization failed
+          content:
+            application/json:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Check image manifest
+      tags:
+      - Manifests
+      operationId: head_v2_name_manifests_reference
+    put:
+      description: 'Update an image''s manifest given a reference or a digest. On digest pushes with `tag=` query
+
+        parameters, 201 responses repeat the `OCI-Tag` header once per tag value.'
+      parameters:
+      - description: Repository name. It can contain slashes, for example `library/alpine`.
+        in: path
+        name: name
+        required: true
+        schema: *id001
+      - description: image reference or digest
+        in: path
+        name: reference
+        required: true
+        schema:
+          type: string
+      - description: additional tag(s) for digest pushes
+        in: query
+        name: tag
+        explode: true
+        schema:
+          type: array
+          items:
+            type: string
+      responses:
+        '201':
+          description: created
+          headers:
+            Docker-Content-Digest:
+              description: Manifest digest of the uploaded content
+              schema:
+                type: string
+            OCI-Tag:
+              description: Echoed tag= value; this header is repeatable (one field per tag= query parameter)
+              schema:
+                type: string
+        '400':
+          description: bad request
+          content:
+            application/json:
+              schema:
+                type: string
+        '404':
+          description: not found
+          content:
+            application/json:
+              schema:
+                type: string
+        '413':
+          description: request entity too large
+          content:
+            application/json:
+              schema:
+                type: string
+        '414':
+          description: too many tag query parameters
+          content:
+            application/json:
+              schema:
+                type: string
+        '500':
+          description: internal server error
+          content:
+            application/json:
+              schema:
+                type: string
+        '503':
+          description: storage temporarily unavailable
+          content:
+            application/json:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Update image manifest
+      tags:
+      - Manifests
+      operationId: put_v2_name_manifests_reference
+      requestBody:
+        required: true
+        description: The manifest. Docker schema 2 manifests are accepted only when `http.compat` includes `docker2s2`.
+        content:
+          application/vnd.oci.image.manifest.v1+json:
+            schema:
+              $ref: '#/components/schemas/api.ImageManifest'
+          application/vnd.oci.image.index.v1+json:
+            schema:
+              $ref: '#/components/schemas/api.ImageIndex'
+  /v2/{name}/referrers/{digest}:
+    get:
+      description: 'Returns referrers for a subject digest as an OCI image index. Missing repositories and
+
+        subjects with no referrers return 200 with an empty manifests list.'
+      parameters:
+      - description: Repository name. It can contain slashes, for example `library/alpine`.
+        in: path
+        name: name
+        required: true
+        schema: *id001
+      - description: digest
+        in: path
+        name: digest
+        required: true
+        schema:
+          type: string
+      - description: artifact type
+        in: query
+        name: artifactType
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/vnd.oci.image.index.v1+json:
+              schema:
+                $ref: '#/components/schemas/api.ImageIndex'
+        '400':
+          description: bad request (invalid digest)
+          content:
+            application/vnd.oci.image.index.v1+json:
+              schema:
+                type: string
+        '404':
+          description: not found (manifest unknown)
+          content:
+            application/vnd.oci.image.index.v1+json:
+              schema:
+                type: string
+        '500':
+          description: internal server error
+          content:
+            application/vnd.oci.image.index.v1+json:
+              schema:
+                type: string
+        '503':
+          description: storage temporarily unavailable
+          content:
+            application/vnd.oci.image.index.v1+json:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Get referrers for a given digest
+      tags:
+      - Tags and referrers
+      operationId: get_v2_name_referrers_digest
+  /v2/{name}/tags/list:
+    get:
+      description: List all image tags in a repository
+      parameters:
+      - description: Repository name. It can contain slashes, for example `library/alpine`.
+        in: path
+        name: name
+        required: true
+        schema: *id001
+      - description: limit entries for pagination
+        in: query
+        name: n
+        required: false
+        schema:
+          type: integer
+      - description: last tag value for pagination
+        in: query
+        name: last
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/common.ImageTags'
+          headers:
+            Link:
+              description: When more results exist, a `rel="next"` link to the next page.
+              schema:
+                type: string
+        '400':
+          description: bad request
+          content:
+            application/json:
+              schema:
+                type: string
+        '404':
+          description: not found
+          content:
+            application/json:
+              schema:
+                type: string
+        '500':
+          description: internal server error
+          content:
+            application/json:
+              schema:
+                type: string
+        '503':
+          description: storage temporarily unavailable
+          content:
+            application/json:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: List image tags
+      tags:
+      - Tags and referrers
+      operationId: get_v2_name_tags_list
+  /zot/auth/apikey:
+    delete:
+      description: Revokes one current user API key based on given key ID
+      parameters:
+      - description: The `uuid` of the key to revoke.
+        in: query
+        name: id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: The key was revoked.
+          content:
+            application/json:
+              schema:
+                type: string
+        '400':
+          description: bad request
+          content:
+            application/json:
+              schema:
+                type: string
+        '401':
+          description: unauthorized
+          content:
+            application/json:
+              schema:
+                type: string
+        '500':
+          description: internal server error
+          content:
+            application/json:
+              schema:
+                type: string
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Revokes one current user API key
+      tags:
+      - Authentication
+      operationId: delete_zot_auth_apikey
+    get:
+      description: Get list of all API keys for a logged in user
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  apiKeys:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/APIKeyDetails'
+        '401':
+          description: unauthorized
+          content:
+            application/json:
+              schema:
+                type: string
+        '500':
+          description: internal server error
+          content:
+            application/json:
+              schema:
+                type: string
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Get list of API keys for the current user
+      tags:
+      - Authentication
+      operationId: get_zot_auth_apikey
+    post:
+      description: Can create an api key for a logged in user, based on the provided label and scopes.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/api.APIKeyPayload'
+        description: The key to create.
+        required: true
+      responses:
+        '201':
+          description: The new key. `apiKey` is returned only once.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIKeyCreated'
+        '400':
+          description: bad request
+          content:
+            application/json:
+              schema:
+                type: string
+        '401':
+          description: unauthorized
+          content:
+            application/json:
+              schema:
+                type: string
+        '413':
+          description: request entity too large
+          content:
+            application/json:
+              schema:
+                type: string
+        '500':
+          description: internal server error
+          content:
+            application/json:
+              schema:
+                type: string
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Create an API key for the current user
+      tags:
+      - Authentication
+      operationId: post_zot_auth_apikey
+  /zot/auth/logout:
+    post:
+      description: 'Logout by removing current session. For OIDC providers that advertise an
+
+        `end_session_endpoint` in their discovery metadata (OpenID Connect
+
+        RP-Initiated Logout 1.0), the response body contains an `endSessionUrl`
+
+        the client should navigate to in order to terminate the session at the IdP.'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/api.LogoutResponse'
+        '500':
+          description: internal server error
+          content:
+            application/json:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Logout by removing current session
+      tags:
+      - Authentication
+      operationId: post_zot_auth_logout
+components:
+  schemas:
+    api.APIKeyPayload:
+      properties:
+        expirationDate:
+          type: string
+          format: date-time
+          description: Optional expiry in RFC 3339 format, for example `2026-12-31T00:00:00Z`. Omit for a key that doesn't
+            expire.
+        label:
+          type: string
+          description: A name for the key.
+        scopes:
+          items:
+            type: string
+          type: array
+          description: Repositories the key is meant for. Stored with the key.
+      type: object
+    api.ExtensionList:
+      properties:
+        extensions:
+          items:
+            $ref: '#/components/schemas/extensions.Extension'
+          type: array
+      type: object
+    api.ImageIndex:
+      properties:
+        annotations:
+          additionalProperties:
+            type: string
+          description: Annotations contains arbitrary metadata for the image index.
+          type: object
+        artifactType:
+          description: ArtifactType specifies the IANA media type of artifact when the manifest is used for an artifact.
+          type: string
+        manifests:
+          description: Manifests references platform specific manifests.
+          items:
+            $ref: '#/components/schemas/v1.Descriptor'
+          type: array
+        mediaType:
+          description: MediaType specifies the type of this document data structure e.g. `application/vnd.oci.image.index.v1+json`
+          type: string
+        schemaVersion:
+          description: SchemaVersion is the image manifest schema that this image follows
+          type: integer
+        subject:
+          allOf:
+          - $ref: '#/components/schemas/v1.Descriptor'
+          description: Subject is an optional link from the image manifest to another manifest forming an association between
+            the image manifest and the other manifest.
+      type: object
+    api.ImageManifest:
+      properties:
+        annotations:
+          additionalProperties:
+            type: string
+          description: Annotations contains arbitrary metadata for the image manifest.
+          type: object
+        artifactType:
+          description: ArtifactType specifies the IANA media type of artifact when the manifest is used for an artifact.
+          type: string
+        config:
+          allOf:
+          - $ref: '#/components/schemas/v1.Descriptor'
+          description: 'Config references a configuration object for a container, by digest.
+
+            The referenced configuration object is a JSON blob that the runtime uses to set up the container.'
+        layers:
+          description: Layers is an indexed list of layers referenced by the manifest.
+          items:
+            $ref: '#/components/schemas/v1.Descriptor'
+          type: array
+        mediaType:
+          description: MediaType specifies the type of this document data structure e.g. `application/vnd.oci.image.manifest.v1+json`
+          type: string
+        schemaVersion:
+          description: SchemaVersion is the image manifest schema that this image follows
+          type: integer
+        subject:
+          allOf:
+          - $ref: '#/components/schemas/v1.Descriptor'
+          description: Subject is an optional link from the image manifest to another manifest forming an association between
+            the image manifest and the other manifest.
+      type: object
+    api.LogoutResponse:
+      properties:
+        endSessionUrl:
+          type: string
+      type: object
+    api.RepositoryList:
+      properties:
+        repositories:
+          items:
+            type: string
+          type: array
+      type: object
+    common.ImageTags:
+      properties:
+        name:
+          type: string
+        tags:
+          items:
+            type: string
+          type: array
+      type: object
+    extensions.Auth:
+      properties:
+        allowAnonymousAccess:
+          type: boolean
+        apikey:
+          type: boolean
+        bearer:
+          $ref: '#/components/schemas/extensions.BearerConfig'
+        htpasswd:
+          $ref: '#/components/schemas/extensions.HTPasswd'
+        ldap:
+          properties:
+            address:
+              type: string
+          type: object
+        openid:
+          $ref: '#/components/schemas/extensions.OpenIDConfig'
+      type: object
+    extensions.BearerConfig:
+      properties:
+        realm:
+          type: string
+        service:
+          type: string
+      type: object
+    extensions.Extension:
+      properties:
+        description:
+          type: string
+        endpoints:
+          items:
+            type: string
+          type: array
+        name:
+          type: string
+        url:
+          type: string
+      type: object
+    extensions.HTPasswd:
+      properties:
+        path:
+          type: string
+      type: object
+    extensions.OpenIDConfig:
+      properties:
+        providers:
+          additionalProperties:
+            $ref: '#/components/schemas/extensions.OpenIDProviderConfig'
+          type: object
+      type: object
+    extensions.OpenIDProviderConfig:
+      properties:
+        name:
+          type: string
+      type: object
+    extensions.StrippedConfig:
+      properties:
+        binaryType:
+          type: string
+        commit:
+          type: string
+        distSpecVersion:
+          type: string
+        http:
+          properties:
+            auth:
+              $ref: '#/components/schemas/extensions.Auth'
+          type: object
+        releaseTag:
+          type: string
+      type: object
+    v1.Descriptor:
+      properties:
+        annotations:
+          additionalProperties:
+            type: string
+          description: Annotations contains arbitrary metadata relating to the targeted content.
+          type: object
+        artifactType:
+          description: ArtifactType is the IANA media type of this artifact.
+          type: string
+        data:
+          description: 'Data is an embedding of the targeted content. This is encoded as a base64
+
+            string when marshalled to JSON (automatically, by encoding/json). If
+
+            present, Data can be used directly to avoid fetching the targeted content.'
+          items:
+            type: integer
+          type: array
+        digest:
+          description: Digest is the digest of the targeted content.
+          type: string
+        mediaType:
+          description: MediaType is the media type of the object this schema refers to.
+          type: string
+        platform:
+          allOf:
+          - $ref: '#/components/schemas/v1.Platform'
+          description: 'Platform describes the platform which the image in the manifest runs on.
+
+
+            This should only be used when referring to a manifest.'
+        size:
+          description: Size specifies the size in bytes of the blob.
+          type: integer
+        urls:
+          description: URLs specifies a list of URLs from which this object MAY be downloaded
+          items:
+            type: string
+          type: array
+      type: object
+    v1.Platform:
+      properties:
+        architecture:
+          description: 'Architecture field specifies the CPU architecture, for example
+
+            `amd64` or `ppc64le`.'
+          type: string
+        os:
+          description: OS specifies the operating system, for example `linux` or `windows`.
+          type: string
+        os.features:
+          description: 'OSFeatures is an optional field specifying an array of strings,
+
+            each listing a required OS feature (for example on Windows `win32k`).'
+          items:
+            type: string
+          type: array
+        os.version:
+          description: 'OSVersion is an optional field specifying the operating system
+
+            version, for example on Windows `10.0.14393.1066`.'
+          type: string
+        variant:
+          description: 'Variant is an optional field specifying a variant of the CPU, for
+
+            example `v7` to specify ARMv7 when architecture is `arm`.'
+          type: string
+      type: object
+    APIKeyDetails:
+      type: object
+      properties:
+        createdAt:
+          type: string
+          format: date-time
+        expirationDate:
+          type: string
+          format: date-time
+          description: The zero time (`0001-01-01T00:00:00Z`) means the key doesn't expire.
+        isExpired:
+          type: boolean
+        creatorUa:
+          type: string
+          description: User agent that created the key.
+        generatedBy:
+          type: string
+        lastUsed:
+          type: string
+          format: date-time
+        label:
+          type: string
+        scopes:
+          type: array
+          nullable: true
+          items:
+            type: string
+        uuid:
+          type: string
+          format: uuid
+    APIKeyCreated:
+      allOf:
+      - $ref: '#/components/schemas/APIKeyDetails'
+      - type: object
+        properties:
+          apiKey:
+            type: string
+            description: The key, with the `zak_` prefix. Use it as the password with HTTP Basic authentication.
+            example: zak_<key>
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+      description: HTTP Basic. Works with htpasswd and LDAP credentials. When API keys are enabled, use your username and
+        the API key (`zak_...`) as the password.
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: A bearer token, from a configured bearer token service or zot's `/zot/auth/token` endpoint.
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: session
+      description: 'Session cookie set after a web UI login. The web UI also sends `X-ZOT-API-CLIENT: zot-ui`.'
+  responses:
+    Unauthorized:
+      description: Authentication is required or the credentials are invalid. The `WWW-Authenticate` header says how to authenticate.
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+    Forbidden:
+      description: The authenticated user isn't allowed to perform this action.
+servers:
+- url: '{scheme}://{host}'
+  description: Your zot registry
+  variables:
+    scheme:
+      default: http
+      enum:
+      - http
+      - https
+    host:
+      default: localhost:5000
+      description: Host and port of your registry
+tags:
+- name: Registry
+  description: Version check, repository catalog, and extension discovery.
+- name: Manifests
+  description: Push, pull, check, and delete image manifests.
+- name: Blobs
+  description: Pull, check, and delete image blobs (layers and configs).
+- name: Blob uploads
+  description: Start, continue, complete, and cancel blob uploads.
+- name: Tags and referrers
+  description: List tags and find artifacts that refer to an image.
+- name: Authentication
+  description: API keys and sessions.
+- name: Extensions
+  description: zot-specific extension endpoints. Available only when the matching extension is enabled.
+security:
+- {}
+- basicAuth: []
+- bearerAuth: []
+- sessionCookie: []

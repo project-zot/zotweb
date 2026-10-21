@@ -1,0 +1,464 @@
+---
+title: "OpenID Connect"
+description: "Sign in with Google, GitHub, GitLab, or any OIDC provider, and authenticate workloads with OIDC tokens."
+icon: "id-badge"
+---
+
+zot supports two OpenID Connect (OIDC) scenarios:
+
+- **Social login** for people, through the web UI and an OpenID or OAuth2 provider. See [Social login](#social-login).
+- **Workload identity** for pods and CI/CD jobs, with OIDC ID tokens in the `Authorization: Bearer` header. See [Workload identity](#workload-identity-oidc-bearer).
+
+## Social login
+
+With social login you use credentials from another service to sign in to zot. For example, you can sign in with your GitHub account. zot contacts the provider and verifies your identity with OAuth 2.0 and [OpenID Connect](https://openid.net/connect/).
+
+| Provider key | Protocol | Typical use |
+|---|---|---|
+| `github` | OAuth2 | GitHub and GitHub Enterprise |
+| `google` | OpenID Connect | Google accounts |
+| `gitlab` | OpenID Connect | GitLab and self-hosted GitLab |
+| `oidc` | OpenID Connect | Any compliant provider, such as [dex](https://dexidp.io/), Zitadel, or Keycloak |
+
+<Info>
+  When OpenID authentication is enabled, zot automatically enables [API keys](/v2.1.x/security/api-keys). Docker, Podman, and other data-path clients can't use browser login, so users create an API key in the web UI and use it as the password.
+</Info>
+
+### Configure providers
+
+```json
+{
+  "http": {
+    "auth": {
+      "openid": {
+        "providers": {
+          "github": {
+            "credentialsFile": "/etc/zot/github-oidc-credentials.json",
+            "scopes": ["read:org", "user", "repo"]
+          },
+          "google": {
+            "credentialsFile": "/etc/zot/google-oidc-credentials.json",
+            "issuer": "https://accounts.google.com",
+            "scopes": ["openid", "email"]
+          },
+          "gitlab": {
+            "credentialsFile": "/etc/zot/gitlab-oidc-credentials.json",
+            "issuer": "https://gitlab.com",
+            "scopes": ["openid", "read_api", "read_user", "profile", "email"]
+          },
+          "oidc": {
+            "credentialsFile": "/etc/zot/oidc-credentials.json",
+            "name": "Corporate SSO",
+            "issuer": "https://sso.example.com",
+            "scopes": ["openid", "profile", "email", "groups"]
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+<ParamField path="providers.<name>.credentialsFile" type="string">
+  Path to a file with the client ID and secret. See [Provider credentials](#provider-credentials). You can instead set `clientid` and `clientsecret` inline, but a separate file keeps secrets out of the main configuration.
+</ParamField>
+<ParamField path="providers.<name>.issuer" type="string">
+  The provider's issuer URL. Required for `google`, `gitlab`, and `oidc`.
+</ParamField>
+<ParamField path="providers.<name>.scopes" type="string[]">
+  Scopes to request. For OpenID providers, zot adds `openid` to the front of the list if you leave it out.
+</ParamField>
+<ParamField path="providers.<name>.name" type="string">
+  A display name for the provider, for example `Corporate SSO`.
+</ParamField>
+<ParamField path="providers.<name>.keypath" type="string">
+  Path to a private key file. When set, zot authenticates to the provider with a signed JWT (JWT profile) instead of the client secret. Leave empty for most setups.
+</ParamField>
+<ParamField path="providers.<name>.authurl" type="string">
+  Custom authorization endpoint, for GitHub Enterprise.
+</ParamField>
+<ParamField path="providers.<name>.tokenurl" type="string">
+  Custom token endpoint, for GitHub Enterprise.
+</ParamField>
+<ParamField path="providers.<name>.claimMapping" type="object">
+  Which claims supply the username and groups. See [Map claims to a username and groups](#map-claims-to-a-username-and-groups).
+</ParamField>
+<ParamField path="callbackAllowOrigins" type="string[]">
+  Origins allowed in an absolute `callback_ui` URL. See [Log in](#log-in).
+</ParamField>
+
+### Provider credentials
+
+Keep credentials in a separate file so you can apply stricter permissions or mount a Kubernetes Secret:
+
+```json /etc/zot/oidc-credentials.json
+{
+  "clientid": "<client-id>",
+  "clientsecret": "<client-secret>"
+}
+```
+
+<ParamField path="clientid" type="string" required>
+  The client ID from your provider.
+</ParamField>
+<ParamField path="clientsecret" type="string" required>
+  The client secret from your provider.
+</ParamField>
+
+### Log in
+
+A client signs in by sending the provider as a query parameter. For Google, GitHub, and GitLab it must also send `callback_ui`, the page zot redirects to after a successful login:
+
+```text
+http://<zot-server>/zot/auth/login?provider=<provider>&callback_ui=<path>
+```
+
+For example, to sign in to the zot home page with GitHub:
+
+```text
+http://zot.example.com:8080/zot/auth/login?provider=github&callback_ui=/home
+```
+
+zot then redirects to the provider, which returns to:
+
+```text
+http://<zot-server>/zot/auth/callback/<provider>
+```
+
+Register this callback URL with your provider. For GitHub, that's `http://zot.example.com:8080/zot/auth/callback/github`.
+
+<Note>
+  If your network policy doesn't allow inbound connections to zot, the callback fails and social login doesn't work.
+</Note>
+
+To prevent open redirects, `callback_ui` is restricted:
+
+- By default it must be a **same-origin relative path**, such as `/v2/` or `/home`.
+- To redirect to a different origin, add that origin to `auth.openid.callbackAllowOrigins`. zot rejects absolute URLs whose origin isn't on the list.
+
+```json
+"http": {
+  "auth": {
+    "openid": {
+      "callbackAllowOrigins": ["https://ui.example.com", "http://localhost:3000"],
+      "providers": { }
+    }
+  }
+}
+```
+
+### Behind a proxy or load balancer
+
+When zot runs behind a proxy or load balancer, set `http.externalUrl` to the public URL so the provider redirects back to the right address:
+
+```json
+"http": {
+  "address": "0.0.0.0",
+  "port": "8080",
+  "externalUrl": "https://zot.example.com",
+  "auth": {
+    "openid": {
+      "providers": {
+        "github": {
+          "credentialsFile": "/etc/zot/github-oidc-credentials.json",
+          "scopes": ["read:org", "user", "repo"]
+        }
+      }
+    }
+  }
+}
+```
+
+### Map claims to a username and groups
+
+`claimMapping` tells zot which claims hold the username and group membership.
+
+```json
+"claimMapping": {
+  "username": "preferred_username",
+  "groups": "groups"
+}
+```
+
+<ParamField path="claimMapping.username" type="string" default="email">
+  The claim to use as the zot username, for example `preferred_username`, `email`, `sub`, `name`, or a custom claim.
+</ParamField>
+<ParamField path="claimMapping.groups" type="string" default="groups">
+  The claim to use for group membership.
+</ParamField>
+
+### GitHub
+
+<AccordionGroup>
+  <Accordion title="Use GitHub teams in access control" defaultOpen>
+    When you enable GitHub login with the `read:org` scope, zot fetches team memberships and exposes them as authorization groups. A group has the form `<org>/<team-slug>`:
+
+    ```json
+    {
+      "http": {
+        "auth": {
+          "openid": {
+            "providers": {
+              "github": {
+                "credentialsFile": "/etc/zot/github-oidc-credentials.json",
+                "scopes": ["read:org", "user", "repo"]
+              }
+            }
+          }
+        },
+        "accessControl": {
+          "repositories": {
+            "infra/**": {
+              "policies": [
+                {
+                  "groups": ["MyOrg/platform-team"],
+                  "actions": ["read", "create", "update"]
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+    ```
+
+    Group names keep GitHub's login casing and team slug. If the organization or team fetch is forbidden, for example because the scope is missing, zot continues authentication but team groups may be unavailable.
+  </Accordion>
+  <Accordion title="GitHub Enterprise">
+    Self-hosted GitHub Enterprise needs custom authorization and token URLs and a username claim mapping:
+
+    ```json
+    "github": {
+      "credentialsFile": "/etc/zot/github-oidc-credentials.json",
+      "authurl": "https://github.company.com/login/oauth/authorize",
+      "tokenurl": "https://github.company.com/login/oauth/access_token",
+      "scopes": ["read:org", "user", "repo"],
+      "claimMapping": {
+        "username": "preferred_username"
+      }
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### dex
+
+[dex](https://dexidp.io/) is an identity service that uses OIDC to authenticate client apps such as zot. zot also works with other OIDC services.
+
+<Steps>
+  <Step title="Register zot in dex">
+    Add a `staticClients` entry to the dex configuration with zot's callback URL:
+
+    ```yaml
+    staticClients:
+      - id: zot-client
+        redirectURIs:
+          - 'http://zot.example.com:8080/zot/auth/callback/oidc'
+        name: 'zot'
+        secret: <client-secret>
+    ```
+  </Step>
+  <Step title="Configure zot">
+    ```json
+    "http": {
+      "auth": {
+        "openid": {
+          "providers": {
+            "oidc": {
+              "credentialsFile": "/etc/zot/sso-oidc-credentials.json",
+              "name": "Corporate SSO",
+              "issuer": "http://<dex-server>:5556/dex",
+              "scopes": ["openid", "profile", "email", "groups"]
+            }
+          }
+        }
+      }
+    }
+    ```
+
+    The credentials file holds `{ "clientid": "zot-client", "clientsecret": "<client-secret>" }`.
+  </Step>
+  <Step title="Log in">
+    Send users to `http://zot.example.com:8080/zot/auth/login?provider=oidc`.
+  </Step>
+</Steps>
+
+See the dex [Getting Started](https://dexidp.io/docs/getting-started/) guide for service setup.
+
+### Sessions
+
+zot keeps browser login state in a session cookie that lasts 2 hours. These optional `auth` settings control where and how sessions are stored:
+
+<ParamField path="http.auth.sessionKeysFile" type="string">
+  Path to a JSON file with the `hashKey` and `encryptKey` used to sign and encrypt session cookies. Set it when you run several zot instances so they share keys. Not supported with the `redis` session driver.
+</ParamField>
+<ParamField path="http.auth.sessionDriver" type="object">
+  Where to store sessions. `name` is `local` (the default behavior) or `redis`. The `redis` driver also takes connection settings such as `url` and `keyprefix`, so that sessions are shared across instances.
+</ParamField>
+<ParamField path="http.auth.secureSession" type="boolean" default="false">
+  Set the `Secure` flag on session cookies. It's always on when `http.tls` is configured.
+</ParamField>
+
+## Workload identity (OIDC bearer)
+
+Workloads such as Kubernetes pods and CI/CD pipelines can authenticate to zot with **OIDC ID tokens** in the `Authorization: Bearer` header and no static credentials. zot validates the token with the configured OIDC issuer and maps its claims to an identity for [access control](/v2.1.x/security/access-control). This is often called *workload identity federation*.
+
+Unlike traditional bearer tokens, which carry repository permissions in an `access` claim and bypass `accessControl`, OIDC tokens carry **identity only**. Authorization is enforced entirely by `accessControl` policies. If an OIDC-authenticated identity isn't named in any policy, zot rejects the request with `403`.
+
+You can configure one or more issuers under `auth.bearer.oidc`. With several issuers, zot tries each in order until one validates the token. `cert` and `awsSecretsManager` aren't needed when you use only OIDC. If you also configure traditional bearer verification, zot tries OIDC first, then falls back to it.
+
+zot initializes OIDC providers lazily on the first authentication, so an unreachable issuer doesn't block startup.
+
+### Basic configuration
+
+```json
+"http": {
+  "auth": {
+    "bearer": {
+      "realm": "zot",
+      "service": "zot-service",
+      "oidc": [
+        {
+          "issuer": "https://kubernetes.default.svc.cluster.local",
+          "audiences": ["zot", "https://zot.example.com"]
+        }
+      ]
+    }
+  }
+}
+```
+
+<ParamField path="issuer" type="string" required>
+  OIDC issuer URL that signs the tokens, for example the Kubernetes API server or GitHub Actions.
+</ParamField>
+<ParamField path="audiences" type="string[]" required>
+  Acceptable token audiences. Specify at least one.
+</ParamField>
+<ParamField path="claimMapping" type="object">
+  [CEL](https://github.com/google/cel-spec) expressions that validate claims and map them to a username and groups. See [Claim mapping with CEL](#claim-mapping-with-cel).
+</ParamField>
+<ParamField path="certificateAuthority" type="string">
+  PEM-encoded CA that validates the issuer's TLS certificate. Mutually exclusive with `certificateAuthorityFile`.
+</ParamField>
+<ParamField path="certificateAuthorityFile" type="string">
+  Path to a PEM file with the issuer's TLS CA. Mutually exclusive with `certificateAuthority`.
+</ParamField>
+<ParamField path="skipIssuerVerification" type="boolean" default="false">
+  Skip issuer verification. For testing only.
+</ParamField>
+
+### Authorize workload identities
+
+Grant access with `accessControl.repositories`. The username is the result of the CEL `username` expression. By default it's `claims.iss + '/' + claims.sub`:
+
+```json
+"http": {
+  "auth": {
+    "bearer": {
+      "realm": "zot",
+      "service": "zot-service",
+      "oidc": [
+        {
+          "issuer": "https://kubernetes.default.svc.cluster.local",
+          "audiences": ["zot"],
+          "claimMapping": {
+            "username": "claims.iss + '/' + claims.sub"
+          }
+        }
+      ]
+    }
+  },
+  "accessControl": {
+    "repositories": {
+      "**": {
+        "policies": [
+          {
+            "users": [
+              "https://kubernetes.default.svc.cluster.local/system:serviceaccount:flux-system:source-controller"
+            ],
+            "actions": ["read", "create", "update", "delete"]
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+### Claim mapping with CEL
+
+The optional `claimMapping` object controls how claims are validated and mapped. Expressions can use:
+
+- **`claims`**: the token claims as a map, such as `claims.sub`, `claims.email`, or `claims['kubernetes.io/serviceaccount/namespace']`.
+- **`vars`**: variables extracted earlier, available in `validations`, `username`, and `groups`.
+
+<ParamField path="claimMapping.username" type="string (CEL)" default="claims.iss + '/' + claims.sub">
+  Expression that returns a string used as the zot username.
+</ParamField>
+<ParamField path="claimMapping.groups" type="string (CEL)">
+  Expression that returns a list of strings used as group membership. No groups are extracted by default.
+</ParamField>
+<ParamField path="claimMapping.variables" type="array">
+  Intermediate variables. Each entry has a `name` and a CEL `expression`. Entries are evaluated in order, and later entries can use earlier ones as `vars.<name>`.
+</ParamField>
+<ParamField path="claimMapping.validations" type="array">
+  Rules that must pass for the token to be accepted. Each has a boolean CEL `expression` and a `message` returned when it evaluates to `false`.
+</ParamField>
+
+For example, to accept only GitHub Actions tokens from one organization and use the repository name as the username:
+
+```json
+"oidc": [
+  {
+    "issuer": "https://token.actions.githubusercontent.com",
+    "audiences": ["zot"],
+    "claimMapping": {
+      "variables": [
+        { "name": "owner", "expression": "claims.repository_owner" },
+        { "name": "repo",  "expression": "claims.repository" }
+      ],
+      "validations": [
+        {
+          "expression": "vars.owner == 'my-org'",
+          "message": "only my-org repositories are allowed"
+        }
+      ],
+      "username": "vars.repo",
+      "groups": "['github-actions', 'ci']"
+    }
+  }
+]
+```
+
+### Registry token-service login
+
+Some clients can't send an OIDC token directly as a bearer credential. Kubelet authentication through an `imagePullSecret` is an example. For these clients, zot supports the token-service flow.
+
+When `auth.bearer.oidc` is configured, an unauthenticated request gets a Bearer challenge that points to `/zot/auth/token`. The client sends the OIDC token as the HTTP Basic **password**. The username is ignored and can be any non-empty value. zot validates the token and returns it as both `token` and `access_token`. The client then retries the request with it as a bearer credential. The endpoint accepts `GET` and `POST`.
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: zot-oidc-pull-secret
+type: kubernetes.io/dockerconfigjson
+stringData:
+  .dockerconfigjson: |
+    {
+      "auths": {
+        "zot.example.com": {
+          "username": "zot",
+          "password": "<oidc-identity-token>"
+        }
+      }
+    }
+```
+
+If you combine OIDC workload identity with traditional bearer authentication, zot can forward non-OIDC credentials to the [upstream token service](/v2.1.x/security/authentication#token-endpoint-and-upstream-token-service).
+
+## Related
+
+- [Authentication overview](/v2.1.x/security/authentication)
+- [Access control](/v2.1.x/security/access-control)
+- [API keys](/v2.1.x/security/api-keys)
+- [Mutual TLS](/v2.1.x/security/mtls), including SPIFFE identities

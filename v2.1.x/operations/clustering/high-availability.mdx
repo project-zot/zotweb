@@ -1,0 +1,147 @@
+---
+title: "High availability"
+description: "Run two zot instances that mirror each other, in an active/standby or active/active layout."
+icon: "heart-pulse"
+---
+
+You can build a highly available zot registry from two ordinary instances, the [`sync` extension](/v2.1.x/operations/mirroring), and a load balancer. The `sync` extension lets one zot mirror another with on-demand and periodic download policies. A load balancer such as [HAProxy](https://www.haproxy.com) sends clients to a healthy instance.
+
+<Info>
+  This approach differs from [scale-out clustering](/v2.1.x/operations/clustering/scale-out). In scale-out, instances usually share storage, so a storage failure affects every instance. Here, each instance has **its own storage**, which gives you an extra layer of safety. Not sure which you need? See the [clustering overview](/v2.1.x/operations/clustering/overview).
+</Info>
+
+Two layouts are possible:
+
+<Tabs>
+  <Tab title="Active/standby">
+    The load balancer sends requests to the active instance. A standby instance mirrors the active one. If the load balancer detects that the active instance failed, it sends requests to the standby.
+  </Tab>
+  <Tab title="Active/active">
+    The load balancer spreads requests between two instances. Each instance mirrors the other.
+  </Tab>
+</Tabs>
+
+<Warning>
+  Mirroring is periodic, so there's a window between sync runs. If a client pushes an image to one instance just after the other has synced, and that instance then fails, the new image isn't on the survivor. Keep the sync interval as short as practical.
+</Warning>
+
+## Configure active/standby
+
+In this layout:
+
+- Both instances are standalone registries with their own storage.
+- Only the **standby** has `sync` enabled, and it periodically syncs from the active instance.
+- The load balancer sends traffic to the active instance and fails over to the standby.
+
+<Steps>
+  <Step title="Configure the active instance">
+    The active instance is an ordinary zot configuration. It needs no `sync` settings.
+  </Step>
+  <Step title="Configure the standby to mirror the active">
+    On the standby, add `sync` with a short `pollInterval` and a `content` rule that matches every repository:
+
+    ```json
+    {
+      "distSpecVersion": "1.1.1",
+      "storage": { "rootDirectory": "/var/lib/registry" },
+      "http": {
+        "address": "0.0.0.0",
+        "port": "5000",
+        "compat": ["docker2s2"]
+      },
+      "log": { "level": "info" },
+      "extensions": {
+        "sync": {
+          "registries": [
+            {
+              "urls": ["https://zot-active.example.com:5000"],
+              "pollInterval": "1m",
+              "onDemand": false,
+              "tlsVerify": true,
+              "maxRetries": 3,
+              "retryDelay": "30s",
+              "content": [{ "prefix": "**" }]
+            }
+          ]
+        }
+      }
+    }
+    ```
+
+    Drop `compat` if all your content is OCI-formatted. See [Mirroring and sync](/v2.1.x/operations/mirroring#enable-compat-for-docker-format-images).
+  </Step>
+  <Step title="Configure the load balancer">
+    Send traffic to the active instance and mark the standby as a backup. This HAProxy example checks `/readyz`:
+
+    ```text
+    frontend zot
+      bind *:443 ssl crt /etc/haproxy/certs/registry.pem
+      mode http
+      default_backend zot
+
+    backend zot
+      mode http
+      option httpchk GET /readyz
+      server zot-active  zot-active.example.com:5000 check ssl verify required ca-file /etc/ssl/certs/ca-certificates.crt
+      server zot-standby zot-standby.example.com:5000 check ssl verify required ca-file /etc/ssl/certs/ca-certificates.crt backup
+    ```
+
+    HAProxy sends requests to a `backup` server only when no other server is healthy.
+  </Step>
+</Steps>
+
+<Note>
+  Sync here runs in one direction only. Pushes that land on the standby after a failover aren't copied back to the original active instance unless you also configure sync in the other direction. When you recover the original instance, decide which side holds the latest content before you point traffic back.
+</Note>
+
+## Configure active/active
+
+In this layout:
+
+- A load balancer, or a [DNS-based scheme](https://coredns.io/plugins/loadbalance/), spreads traffic between the instances.
+- You need [path-based routing](https://www.haproxy.com/blog/path-based-routing-with-haproxy), so pushes for a given repository go to one instance. This keeps both instances from taking conflicting writes for the same repository.
+- Both instances are standalone registries with their own storage.
+- Each instance has `sync` enabled and mirrors the other.
+
+Each instance uses the same shape of configuration, pointing at its peer:
+
+```json
+{
+  "distSpecVersion": "1.1.1",
+  "storage": { "rootDirectory": "/var/lib/registry" },
+  "http": { "address": "0.0.0.0", "port": "5000" },
+  "log": { "level": "info" },
+  "extensions": {
+    "sync": {
+      "registries": [
+        {
+          "urls": ["https://zot-b.example.com:5000"],
+          "pollInterval": "1m",
+          "onDemand": false,
+          "tlsVerify": true,
+          "content": [{ "prefix": "**" }]
+        }
+      ]
+    }
+  }
+}
+```
+
+On instance B, set `urls` to instance A.
+
+<Tip>
+  If a sync `urls` list has several entries, zot drops any entry that points to the instance itself. With a single URL it doesn't. Make sure each instance's URL points to its peer, not to itself, and don't copy one configuration file to both instances unchanged.
+</Tip>
+
+## Operate a highly available pair
+
+- **Test failover** regularly. Stop the active instance and check that the load balancer moves traffic and that pulls succeed from the survivor.
+- **Watch sync.** Look for sync errors in the logs. A failing mirror silently erodes your protection.
+- **Keep settings aligned.** Garbage collection and [retention](/v2.1.x/operations/retention-gc) run independently on each instance, so use the same policies on both.
+- **Back up anyway.** A second copy is not a backup. See [Backup and restore](/v2.1.x/operations/backup-restore).
+
+## Related
+
+- [Mirroring and sync](/v2.1.x/operations/mirroring) for every sync option
+- [Scale-out clustering](/v2.1.x/operations/clustering/scale-out) to spread load across instances
+- [Production checklist](/v2.1.x/operations/production-checklist)

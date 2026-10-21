@@ -1,0 +1,50 @@
+---
+title: "Compare zot"
+description: "What sets zot apart from other container registries, and how to evaluate one for your needs."
+icon: "scale-balanced"
+---
+
+zot is built around one idea: a registry that is **OCI standards only**, on the wire and on disk, with everything beyond the standard kept in clearly separated extensions.
+
+## What zot gives you out of the box
+
+Many registries get these capabilities from add-on components or separate services. In zot they're built in.
+
+| Capability | In zot |
+|---|---|
+| Distribution Specification conformance | Yes |
+| Storage layout | OCI v1 image layout, the only supported layout |
+| Authentication and authorization | Built in ([Authentication](/v2.1.x/security/authentication)) |
+| Garbage collection | Inline, no server shutdown ([Retention and GC](/v2.1.x/operations/retention-gc)) |
+| Storage deduplication | Inline ([Storage overview](/v2.1.x/configuration/storage/overview)) |
+| Cloud storage | S3, GCS, and Azure |
+| Delete by tag | Yes |
+| Vulnerability scanning | Built in ([CVE scanning](/v2.1.x/security/cve-scanning)) |
+| Image signatures | cosign and notation ([Signatures](/v2.1.x/security/signatures)) |
+| Command line and UI | `zli` and a web UI |
+| Minimal build | Yes, for a smaller attack surface |
+| Single binary | Yes |
+| License | Apache 2.0 |
+
+## Evaluate a registry against your requirements
+
+When you compare zot with another registry, check each of these against that registry's current documentation:
+
+<Steps>
+  <Step title="Standards conformance">
+    Does it pass the OCI Distribution Specification conformance tests, and does it store content in a standard layout you can move away from?
+  </Step>
+  <Step title="Security model">
+    Is authentication and authorization built in or delegated to a separate service? Does it verify signatures and scan for vulnerabilities?
+  </Step>
+  <Step title="Operations">
+    Does garbage collection require downtime? Is deduplication available? How does it scale and fail over?
+  </Step>
+  <Step title="Footprint">
+    How many components do you have to deploy, and can you reduce the attack surface?
+  </Step>
+</Steps>
+
+<Note>
+  Registry features change quickly, so this page doesn't include a side-by-side table of other products. For zot-specific capabilities, see [Features](/v2.1.x/features). To discuss a comparison or migration, ask in the [CNCF Slack](https://cloud-native.slack.com/archives/C03EGRE4QGH).
+</Note>

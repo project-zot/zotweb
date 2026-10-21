@@ -1,0 +1,150 @@
+---
+title: "Backup and restore"
+description: "What to back up in a zot deployment, how to take a consistent backup, and how to restore and verify it."
+icon: "life-ring"
+---
+
+zot has no built-in backup command. A backup is a copy of its data and configuration, taken with your own tools. This page lists what to copy, what to watch for, and how to check a restore.
+
+<Note>
+  Back up before every [upgrade](/v2.1.x/install/upgrade), and test your restore process on a spare machine before you need it.
+</Note>
+
+## What to back up
+
+A zot deployment has four kinds of state.
+
+| State | Where it lives | Can zot rebuild it? |
+|---|---|---|
+| **Images and artifacts** | `storage.rootDirectory`, and the root directory of each `subPaths` entry, or your S3, GCS, or Azure bucket | No. This is your data. |
+| **MetaDB**: search index, API keys, stars and bookmarks, download statistics | `meta.db` in the default `rootDirectory` (BoltDB), or in Redis or DynamoDB when `remoteCache` is on | Partly. See [MetaDB](#metadb). |
+| **Dedupe cache** | `cache.db` in each storage root (BoltDB), or Redis or DynamoDB | Yes, at startup. See [Deduplication](#deduplication-and-hard-links). |
+| **Configuration and secrets** | Files outside the storage directory | No. |
+
+### Configuration and secrets
+
+Back up everything the server reads at startup, and store it with the same care as the secrets it holds:
+
+- The configuration file, for example `/etc/zot/config.json`.
+- Files the configuration refers to: the `htpasswd` file, `credentialsFile` files for LDAP, OpenID, and sync, TLS certificates, keys and CA files, and the Trivy ignore file if you use one.
+- Uploaded signature material. zot stores cosign public keys in the `_cosign` directory and notation certificates and trust policy in `_notation`, both under `rootDirectory`, unless you use a secrets manager. They're part of the storage backup. See [Verify image signatures](/v2.1.x/security/signatures#where-uploaded-files-are-stored).
+- Your service definition, for example the systemd unit.
+
+### Images and artifacts
+
+Under each storage root, zot keeps one directory per repository in the OCI image layout: `oci-layout`, `index.json`, and `blobs/<algorithm>/<digest>`. Back up the whole root directory.
+
+If you use `storage.subPaths`, each sub-path has its own root directory. Back up all of them. See [Local storage](/v2.1.x/configuration/storage/local).
+
+### MetaDB
+
+- **Local storage:** `meta.db` is a BoltDB file in the default `rootDirectory`. It holds the search and UI metadata, API keys, user stars and bookmarks, and download statistics.
+- **Remote cache:** when `remoteCache` is `true`, MetaDB lives in Redis or DynamoDB instead. For DynamoDB it uses the tables you named in `cacheDriver`, for example `repometatablename`, `imagemetatablename`, `apikeytablename`, `userdatatablename`, and `versiontablename`. For Redis it uses keys under your `keyprefix`. Back these up with your provider's tools. See [Cache drivers](/v2.1.x/configuration/storage/cache-drivers).
+
+zot can rebuild repository metadata from the images on disk. On start, it walks storage and rebuilds it before the registry becomes ready. It can't rebuild API keys, user stars and bookmarks, or download statistics. If you need those, you need the MetaDB backup.
+
+## Take a consistent backup
+
+zot handles requests, garbage collection, and background tasks while it runs, so files on disk change under a plain copy.
+
+<Warning>
+  zot doesn't guarantee that a plain file copy of a running registry, or of a live `meta.db`, is consistent. Treat it as unsafe until you've tested it, and prefer one of the options below.
+</Warning>
+
+In order of preference:
+
+<Tabs>
+  <Tab title="Snapshot">
+    Use an atomic filesystem or volume snapshot (LVM, ZFS, Btrfs, or a cloud volume snapshot) of the volume that holds `rootDirectory`, then copy from the snapshot. The snapshot captures one point in time, so images and `meta.db` agree with each other. Include the sub-path volumes in the same snapshot group.
+  </Tab>
+  <Tab title="Stop zot, then copy">
+    The most conservative option. Stop the service, copy the directories, and start it again. The registry is unavailable during the copy.
+
+    ```bash
+    sudo systemctl stop zot
+    sudo rsync -aH /data/zot/ /backup/zot/
+    sudo systemctl start zot
+    ```
+
+    `-H` preserves hard links. See the next section.
+  </Tab>
+  <Tab title="Replicate with a second registry">
+    Keep a second zot instance in sync with [mirroring](/v2.1.x/operations/mirroring), and treat it as a recoverable copy of the images. This covers image content only. It doesn't carry API keys or user preferences.
+  </Tab>
+</Tabs>
+
+Things to watch for in any approach:
+
+- **In-flight uploads.** zot stages partial uploads in `.uploads` directories inside each repository. They're transient, and garbage collection removes stale ones. Don't rely on them in a backup. Verify on your version before excluding them.
+- **Garbage collection.** A backup taken while GC runs can include blobs GC is about to remove, or miss content from a manifest that was just pushed. A snapshot or a stop avoids this. See [Retention and garbage collection](/v2.1.x/operations/retention-gc).
+- **Copying `meta.db` while zot runs.** BoltDB is a single file with its own consistency rules. Don't copy it live. Take it from a snapshot, or while zot is stopped.
+
+### Deduplication and hard links
+
+With `dedupe` on, local storage saves space by hard-linking identical blobs across repositories. A backup tool that doesn't preserve hard links writes each copy as a full file, so the backup is larger than the source. Use a tool and flags that preserve hard links, such as `rsync -aH`, or a filesystem snapshot.
+
+At startup, zot enforces the `dedupe` setting on existing storage. With `dedupe: true`, it deduplicates all blobs it finds, so a restore from a backup that expanded the hard links gets its space back once zot starts. See [Storage overview](/v2.1.x/configuration/storage/overview#deduplication).
+
+### Remote storage
+
+For S3, GCS, or Azure, zot doesn't copy the data for you. Use your provider's features: bucket versioning, replication to another bucket or region, or scheduled copies.
+
+<Warning>
+  With `dedupe` on remote storage, a duplicate blob can be an empty placeholder object. zot resolves it to the real content through the cache driver (Redis or DynamoDB), which records which copy holds the content. Back up the bucket **and** the cache database from the same point in time. If you restore the bucket without the cache, zot can't resolve those placeholders until it rebuilds the cache. Test this restore path in your environment before you rely on it.
+</Warning>
+
+## Restore
+
+<Steps>
+  <Step title="Stop zot">
+    If zot is running against the target storage, stop it first.
+
+    ```bash
+    sudo systemctl stop zot
+    ```
+  </Step>
+  <Step title="Restore configuration and secrets">
+    Put back the configuration file, credentials files, TLS material, and `htpasswd`. Keep file ownership and permissions: the files in `/etc/zot` are root-owned, and the storage directory must be writable by the zot user.
+  </Step>
+  <Step title="Restore storage and MetaDB">
+    Restore the storage root directories and, for local MetaDB, `meta.db`. For remote storage, restore the bucket and the Redis or DynamoDB data from the same point in time. Set ownership so the zot user can write:
+
+    ```bash
+    sudo chown -R zot:zot /data/zot
+    ```
+  </Step>
+  <Step title="Validate the configuration">
+    ```bash
+    sudo -u zot zot verify /etc/zot/config.json
+    ```
+  </Step>
+  <Step title="Check storage integrity before you serve traffic">
+    The `zot scrub` command checks manifest and blob integrity. It needs the server to be down. It reports an error and exits if it finds a running server on the configured address.
+
+    ```bash
+    sudo -u zot zot scrub /etc/zot/config.json
+    ```
+
+    Read the report and investigate any corrupted or missing blobs.
+  </Step>
+  <Step title="Start zot and wait for readiness">
+    ```bash
+    sudo systemctl start zot
+    zot healthcheck /etc/zot/config.json
+    ```
+
+    If `meta.db` is missing, zot walks storage and rebuilds repository metadata before it becomes ready. On a large registry this can take long enough for a `Type=notify` systemd unit to hit its startup timeout. Raise `TimeoutStartSec`, or use `Type=simple` for that start. See [Install on Linux](/v2.1.x/install/linux).
+  </Step>
+</Steps>
+
+## Verify a restore
+
+- `curl http://localhost:5000/v2/_catalog` lists the repositories you expect.
+- Pull a few images, including a large multi-layer image and an image from a deduplicated repository.
+- Check that signed images still verify, if you use [signature verification](/v2.1.x/security/signatures).
+- Check that API keys still work, if you use them. If `meta.db` wasn't restored, users must create their keys again.
+- With the `scrub` [extension](/v2.1.x/configuration/extensions#scrub) enabled, watch the logs for the next scheduled integrity check.
+
+<Tip>
+  Schedule a regular test restore. A backup you've never restored is a guess.
+</Tip>

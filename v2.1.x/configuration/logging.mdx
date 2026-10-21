@@ -1,0 +1,59 @@
+---
+title: "Logging"
+description: "Configure the log level, log file, and the audit log."
+icon: "scroll"
+---
+
+zot writes structured JSON logs. Configure them in the `log` section.
+
+```json
+"log": {
+  "level": "info",
+  "output": "/var/log/zot/zot.log",
+  "audit": "/var/log/zot/zot-audit.log"
+}
+```
+
+<ParamField path="log.level" type="string" default="debug">
+  The minimum severity to log. Valid values are `debug`, `trace`, `info`, `warn` (or `warning`), `error`, `fatal`, and `panic`. `trace` is the same as `debug`, and `fatal` and `panic` are the same as `error`. An invalid value fails configuration validation.
+</ParamField>
+
+<ParamField path="log.output" type="string">
+  Path to the log file. zot creates it if it doesn't exist and appends to it. If you omit it, zot writes to standard output.
+</ParamField>
+
+<ParamField path="log.audit" type="string">
+  Path to a separate audit log file. If you omit it, zot doesn't write an audit log.
+</ParamField>
+
+<Tip>
+  Use `info` in production. The default `debug` is verbose and can slow a busy registry. In containers, leave `output` unset so the container runtime collects the logs from standard output.
+</Tip>
+
+## Audit log
+
+The audit log records the changes made through the HTTP API, separately from the operational log. Each entry is written for a successful `POST`, `PUT`, `PATCH`, or `DELETE` request, meaning a response of `200`, `201`, or `202`. It includes:
+
+| Field | Description |
+|---|---|
+| `clientIP` | Remote address of the client |
+| `subject` | Authenticated user name, or `anonymous` |
+| `action` | HTTP method |
+| `object` | Request path and query |
+| `status` | HTTP status code |
+
+```json
+{"time":"2026-10-20T10:15:30.123456789Z","level":"info","component":"session","clientIP":"192.0.2.10:51234","subject":"alice","action":"PUT","object":"/v2/app/manifests/v1","status":201,"message":"HTTP API Audit"}
+```
+
+<Warning>
+  Audit entries are written at the `info` level, and the audit log uses the same `log.level` as the main log. If you set `log.level` to `warn` or `error`, the audit log stays empty. Keep `log.level` at `info` or `debug` when you use `log.audit`.
+</Warning>
+
+<Note>
+  `log` settings need a restart to change. They aren't reloaded when you edit the file. See [Configuration overview](/v2.1.x/configuration/overview#reload-configuration-without-a-restart).
+</Note>
+
+## Ship and monitor logs
+
+In Kubernetes, you can collect zot's logs with a tool such as [Filebeat](https://www.elastic.co/beats/filebeat) and send them to the Elastic stack. For logs, metrics, and health checks together, see [Monitoring](/v2.1.x/operations/monitoring).

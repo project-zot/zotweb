@@ -1,0 +1,147 @@
+---
+title: "Profile performance"
+description: "Collect CPU, memory, and trace profiles from a running zot and analyze them with Go tools."
+icon: "magnifying-glass-chart"
+---
+
+zot includes Go's [pprof](https://pkg.go.dev/runtime/pprof) profiling tools. An administrator can collect CPU usage, memory allocations, and execution traces from a running registry and analyze them with Go tools and visualizers.
+
+The examples on this page assume zot is at `localhost:8080`.
+
+<Warning>
+  Profiling endpoints expose internal runtime detail. If you enable authentication, only an admin user can reach them. If you don't enable authentication, anyone who can reach zot can read them, so don't leave profiling reachable on an unauthenticated registry.
+</Warning>
+
+## Requirements
+
+- **A binary built with profiling.** The profiling endpoints exist only in binaries built with the `profile` label. The standard full binary and image include it. The minimal binary doesn't, and a build without it logs a warning and skips the endpoints. There's no configuration key for profiling.
+- **An admin policy when authentication is on.** With authentication enabled, define an `accessControl.adminPolicy` that matches the user. Without a matching admin policy, even authenticated users get an error. See [Access control](/v2.1.x/security/access-control).
+
+## Available profiles
+
+To see the current profiles with a count of records for each, request the index:
+
+```bash
+curl http://localhost:8080/v2/_zot/pprof/
+```
+
+| Profile | Description |
+|---|---|
+| `allocs` | A sample of all past memory allocations. |
+| `block` | Stack traces that led to blocking on synchronization primitives. |
+| `cmdline` | The command line of the running program. |
+| `goroutine` | Stack traces of all current goroutines. Add `debug=2` to export them in the same format as an unrecovered panic. |
+| `heap` | A sample of memory allocations of live objects. Add the `gc` parameter to run garbage collection before sampling. |
+| `mutex` | Stack traces of holders of contended mutexes. |
+| `profile` | The CPU usage profile. Set the collection window with the `seconds` parameter. |
+| `threadcreate` | Stack traces that led to the creation of new OS threads. |
+| `trace` | An execution trace. Set the collection window with the `seconds` parameter. |
+
+## Export a profile
+
+Request `/v2/_zot/pprof/<profile>` with optional query parameters:
+
+```bash
+curl -s "http://localhost:8080/v2/_zot/pprof/profile?seconds=30" > cpu.prof
+```
+
+- `seconds` sets how long to collect for the `profile` and `trace` profiles. The default is 30 seconds.
+- Redirect the output to a file, or use `curl -O` to save it under the default profile name. Without a file or redirect, `curl` fails with `Failure writing output to destination`.
+- With authentication on, add credentials, for example `curl -u admin:<password> ...`.
+- The output is a binary format meant for analysis tools, not for reading directly. Add `debug=1` to some profiles to get legacy text output.
+
+<Tip>
+  Collect the profile while the registry is under the load you want to understand. Pair it with [`zb`](/v2.1.x/operations/benchmarking-zb) to generate repeatable load.
+</Tip>
+
+## Analyze a CPU profile
+
+Go's `pprof` tool can present a profile in several ways. See the [pprof documentation](https://pkg.go.dev/runtime/pprof) for more.
+
+<Tabs>
+  <Tab title="Web interface">
+    Pass an HTTP port to open a local web server for exploring the profile:
+
+    ```bash
+    go tool pprof -http=:9090 cpu.prof
+    ```
+
+    ```text
+    Serving web UI on http://localhost:9090
+    ```
+
+    Use the **VIEW** menu to switch presentations.
+
+    <Frame>
+      <img src="/images/pprof-view-menu.jpg" alt="The pprof web interface with the VIEW menu open, listing Top, Graph, Flame Graph, Peek, Source, and Disassemble" style={{ maxWidth: "300px" }} />
+    </Frame>
+
+    A flame graph is often the quickest way to see what uses the most CPU:
+
+    <Frame>
+      <img src="/images/pprof-flame-graph.svg" alt="A pprof flame graph of zot CPU usage" style={{ maxWidth: "300px" }} />
+    </Frame>
+  </Tab>
+  <Tab title="Image">
+    Generate a graphic of the profile, here a PNG:
+
+    ```bash
+    go tool pprof -png cpu.prof
+    ```
+
+    ```text
+    Generating report in profile001.png
+    ```
+  </Tab>
+  <Tab title="Interactive">
+    Open an interactive session and run `top` to list the functions that used the most CPU:
+
+    ```bash
+    go tool pprof cpu.prof
+    ```
+
+    ```text
+    Type: cpu
+    Duration: 30s, Total samples = 10ms (  0.1%)
+    Entering interactive mode (type "help" for commands, "o" for options)
+    (pprof) top
+    Showing nodes accounting for 10ms, 100% of 10ms total
+          flat  flat%   sum%        cum   cum%
+          10ms   100%   100%       10ms   100%  runtime.pthread_cond_signal
+             0     0%   100%       10ms   100%  runtime.findRunnable
+    ```
+  </Tab>
+</Tabs>
+
+## Analyze an execution trace
+
+Collect a trace:
+
+```bash
+curl -s "http://localhost:8080/v2/_zot/pprof/trace?seconds=30" > trace.prof
+```
+
+Open it with `go tool trace`, which starts a local web server and opens the trace viewer:
+
+```bash
+go tool trace trace.prof
+```
+
+You can also turn a trace into a pprof-style profile for network, synchronization, syscall, or scheduler latency:
+
+```bash
+go tool trace -pprof=net trace.prof
+```
+
+The accepted values are `net`, `sync`, `syscall`, and `sched`.
+
+## Memory and goroutine profiles
+
+```bash
+# Heap, after a garbage collection
+curl -s "http://localhost:8080/v2/_zot/pprof/heap?gc=1" > heap.prof
+go tool pprof -http=:9090 heap.prof
+
+# All goroutines, in panic format (useful for hangs)
+curl -s "http://localhost:8080/v2/_zot/pprof/goroutine?debug=2" > goroutines.txt
+```

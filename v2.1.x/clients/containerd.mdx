@@ -1,0 +1,61 @@
+---
+title: "containerd"
+description: "Configure containerd to pull and mirror images through zot."
+icon: "cube"
+---
+
+[containerd](https://containerd.io/) supports registry mirroring, and zot can be the upstream registry that it mirrors from.
+
+The examples assume your images are in a repository named `docker` in the zot registry, and that you want containerd to pull `docker.io` images from it.
+
+<Note>
+  Docker Engine can also use the containerd image store. That setup is covered in [Docker client](/v2.1.x/clients/docker#docker-with-the-containerd-image-store).
+</Note>
+
+<Tabs>
+  <Tab title="containerd v1.x">
+    The mirror is configured inline as part of the CRI plugin, in `/etc/containerd/config.toml`:
+
+    ```toml
+    version = 2
+
+    [plugins."io.containerd.grpc.v1.cri".registry.mirrors."docker.io"]
+      endpoint = ['https://<my zot instance>:8080/v2/docker']
+    ```
+
+    <Warning>
+      The `/v2` path segment is required.
+    </Warning>
+  </Tab>
+  <Tab title="containerd v2.x">
+    Mirror configuration moved to a directory structure. Point containerd at a config directory:
+
+    ```toml /etc/containerd/config.toml
+    version = 3
+
+    [plugins."io.containerd.cri.v1.images".registry]
+      config_path = "/etc/containerd/certs.d"
+    ```
+
+    Create a `hosts.toml` for the registry you want to mirror. The directory name is the upstream registry, or `_default` to apply to all registries:
+
+    ```text
+    /etc/containerd/certs.d/
+    └── _default
+        └── hosts.toml
+    ```
+
+    ```toml /etc/containerd/certs.d/_default/hosts.toml
+    # zot is running at localhost:8080
+    server = "http://localhost:8080"
+    ```
+  </Tab>
+</Tabs>
+
+For more mirror options, see the [containerd hosts documentation](https://github.com/containerd/containerd/blob/main/docs/hosts.md#registry-configuration---examples).
+
+## Related
+
+- [Mirroring and sync](/v2.1.x/operations/mirroring) to populate zot with upstream content
+- [Test deployments with kind](/v2.1.x/guides/kind), which configures containerd to pull from a local zot registry
+- [Client compatibility](/v2.1.x/clients/compatibility)

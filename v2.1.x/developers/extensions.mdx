@@ -1,0 +1,102 @@
+---
+title: "Develop extensions"
+description: "Guidelines for adding a new extension to zot, including build tags, no-op files, authorization, and tests."
+icon: "puzzle-piece"
+---
+
+You can add functionality to zot by developing an [extension](/v2.1.x/concepts/extensions). The OCI Distribution Specification lets a registry add extensions, which are new APIs developed outside the core specs. Before you plan one, read the [OCI guidelines for extensions](https://github.com/opencontainers/distribution-spec/tree/main/extensions).
+
+<Info>
+  Propose a new extension in a GitHub issue first. The maintainers review it to keep the architecture consistent and avoid duplicate work.
+</Info>
+
+## Existing extensions
+
+The extensions in the zot repository are `sync`, `search`, `scrub`, `metrics`, `lint`, `ui`, `mgmt`, `userprefs`, `imagetrust`, and `events`. The `profile` and `debug` build labels are also treated as extensions by the build. Read their implementations under [`pkg/extensions`](https://github.com/project-zot/zot/tree/main/pkg/extensions) for working examples. For how users configure them, see [Enable extensions](/v2.1.x/configuration/extensions).
+
+## How a build includes an extension
+
+zot uses Go build tags so that the minimal build contains none of the extension code. Every extension has two versions of its code:
+
+| File | Build constraint | Included in |
+|---|---|---|
+| The real implementation | `//go:build foo` | Binaries built with the `foo` extension |
+| A "no-op" twin | `//go:build !foo` | Binaries built without it |
+
+<Steps>
+  <Step title="Tag the implementation">
+    Start each file that belongs only to extension `foo` with a build constraint, followed by a blank line:
+
+    ```go
+    //go:build foo
+
+    package foo
+    ```
+  </Step>
+  <Step title="Add a no-op twin">
+    For every file with extension-specific functions, create a twin that declares exactly the same functions and types, but does nothing beyond returning a success value where one is expected. Name it by appending `_disabled`, and give it the opposite constraint:
+
+    ```go
+    //go:build !foo
+
+    package foo
+    ```
+
+    The twin is compiled into binaries that don't include `foo`, so the rest of zot builds without special cases. See [`lint_disabled.go`](https://github.com/project-zot/zot/blob/main/pkg/extensions/lint/lint_disabled.go) and [`extensions_lint_disabled.go`](https://github.com/project-zot/zot/blob/main/pkg/extensions/extensions_lint_disabled.go).
+  </Step>
+  <Step title="Register the extension in the Makefile">
+    Add the name to `EXTENSIONS` (the default set for full builds) and `ALL_EXTENSIONS` in the `Makefile`. `EXTENSIONS` is what targets such as `make binary` and `make test` use.
+  </Step>
+  <Step title="Add configuration">
+    Add the extension's settings to the configuration model in `pkg/extensions/config`, and an example to `examples/`. The `make verify-config` target validates the examples.
+  </Step>
+</Steps>
+
+<Note>
+  Older documentation also asked for a second `// +build foo` line. Current files use only the `//go:build` line. The linter adds it automatically if it's missing.
+</Note>
+
+## Authorization
+
+Each extension is responsible for authorizing the HTTP endpoints it adds. zot authenticates the request and puts the user's information in the request context, but the extension enforces permissions.
+
+Read it with `requestcontext.UserAcFromContext` in your handler. The returned `UserAccessControl` has methods such as:
+
+| Method | Use |
+|---|---|
+| `GetUsername()` and `GetGroups()` | Who is calling |
+| `IsAnonymous()` and `IsAdmin()` | Caller type |
+| `Can(action, repository)` | Whether the caller may perform an action on a repository |
+| `CanOnResource(action, repository, reference)` | Same check, including CEL conditions that depend on the reference |
+
+See `pkg/requestcontext/user_access_control.go` and [Access control](/v2.1.x/security/access-control) for the policy model.
+
+## Tests
+
+<Steps>
+  <Step title="Unit tests">
+    Add tests with the same build tags as the code. `make test-extended` runs them with all extensions, and `make test-minimal` confirms the minimal build still compiles and passes.
+  </Step>
+  <Step title="Blackbox test">
+    Write a Bats test that runs a binary containing your extension in a realistic scenario. Examples are in [`test/blackbox`](https://github.com/project-zot/zot/tree/main/test/blackbox).
+  </Step>
+  <Step title="Makefile target and workflow">
+    Add a Makefile target for the new blackbox test, and add it to the GitHub workflow in [`.github/workflows/ecosystem-tools.yaml`](https://github.com/project-zot/zot/blob/main/.github/workflows/ecosystem-tools.yaml).
+  </Step>
+</Steps>
+
+## Build with selected extensions
+
+A full build (`make binary`) includes every extension in `EXTENSIONS`. To build with only some, set the variable:
+
+```bash
+make binary EXTENSIONS=sync,scrub
+```
+
+<Warning>
+  Some extensions depend on others. The `ui` extension needs `search`, `mgmt`, and `userprefs`, and the build adds them for you. When you list several extensions yourself, check that the ones you need still work.
+</Warning>
+
+## Configuration order
+
+In the `extensions` section of the configuration, list a new extension after the existing ones.
