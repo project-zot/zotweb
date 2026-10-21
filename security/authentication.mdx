@@ -1,0 +1,344 @@
+---
+title: "Authentication"
+description: "Control who can reach your registry: TLS, htpasswd, LDAP, bearer tokens, OpenID Connect, API keys, and mutual TLS."
+icon: "key"
+---
+
+zot separates **authentication** (who are you?) from **authorization** (what may you do?). Authentication credentials give access to the zot HTTP APIs. [Access control](/security/access-control) policies then decide what each authenticated identity can do in each repository.
+
+## Authentication methods
+
+| Method | Configuration key | Best for |
+|---|---|---|
+| [TLS](#tls) | `http.tls` | Encrypting traffic. Required whenever credentials cross a network. |
+| [htpasswd](#htpasswd) | `http.auth.htpasswd` | Small teams and a fail-safe local login. |
+| [LDAP](/security/ldap) | `http.auth.ldap` | Corporate directories such as Active Directory. |
+| [Bearer token](#bearer-token-authentication) | `http.auth.bearer` | An existing token service, or short-lived tokens for clients. |
+| [OIDC workload identity](/security/openid#workload-identity-oidc-bearer) | `http.auth.bearer.oidc` | Kubernetes pods and CI/CD jobs with no static credentials. |
+| [OpenID Connect and OAuth2 login](/security/openid) | `http.auth.openid` | Single sign-on for people through the web UI (Google, GitHub, GitLab, dex). |
+| [API keys](/security/api-keys) | `http.auth.apikey` | Docker, Podman, kubelet, and scripts for users who sign in with OpenID. |
+| [Mutual TLS](/security/mtls) | `http.tls.cacert` and `http.auth.mtls` | Password-less client certificate authentication. |
+
+You can combine methods. See [Combining methods](#combining-methods).
+
+<Note>
+  If you configure `accessControl` and no authentication, zot accepts only configurations where every policy is an `anonymousPolicy`. Otherwise it refuses to start.
+</Note>
+
+## TLS
+
+Credentials travel in HTTP headers, so enable TLS. Configure the server certificate in `http.tls`:
+
+```json
+"http": {
+  "tls": {
+    "cert": "/etc/zot/certs/server.cert",
+    "key": "/etc/zot/certs/server.key"
+  }
+}
+```
+
+See [HTTP and TLS](/configuration/http) for all listener options. To also require and verify client certificates, see [Mutual TLS](/security/mtls).
+
+## htpasswd
+
+`htpasswd` is local, needs no remote service, and works with [HTTP Basic authentication](https://www.rfc-editor.org/rfc/rfc7617.html). The client joins username and password with a colon, base64-encodes the result, and sends it in the `Authorization` header.
+
+<Steps>
+  <Step title="Create the file">
+    Create the file with bcrypt hashes. bcrypt (`-B`) is the only algorithm zot supports for `htpasswd`.
+
+    ```bash
+    htpasswd -bBn <username> <password> >> /etc/zot/htpasswd
+    ```
+  </Step>
+  <Step title="Point zot at the file">
+    ```json
+    "http": {
+      "auth": {
+        "htpasswd": {
+          "path": "/etc/zot/htpasswd"
+        }
+      }
+    }
+    ```
+  </Step>
+</Steps>
+
+<ParamField path="http.auth.htpasswd.path" type="string" required>
+  Path of the `htpasswd` file with user names and bcrypt-hashed passwords.
+</ParamField>
+
+zot watches this file and reloads accounts when it changes. Kubernetes Secret volumes update files by atomically replacing symlink targets. zot detects these replacements, so you can update a Secret-mounted `htpasswd` file without restarting the pod.
+
+<Note>
+  When both `htpasswd` and [LDAP](/security/ldap) are configured, zot checks `htpasswd` first because it's local, then tries LDAP. A credential that either backend accepts authenticates the user. This keeps a local account usable if the LDAP server becomes unavailable.
+</Note>
+
+## Bearer token authentication
+
+To avoid sending the username and password with every request, a client authenticates once with a token server and receives a short-lived token. It then sends the token in the `Authorization` header with the `Bearer` scheme ([RFC 6750](https://www.rfc-editor.org/rfc/rfc6750)).
+
+Traditional bearer tokens are signed JWTs that carry repository permissions in an `access` claim. They authorize repository scopes and **bypass** `accessControl`. Configure how zot verifies them:
+
+<Tabs>
+  <Tab title="Static certificate">
+    ```json
+    "http": {
+      "auth": {
+        "bearer": {
+          "realm": "https://auth.myreg.io/auth/token",
+          "service": "myauth",
+          "cert": "/etc/zot/auth.crt"
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="AWS Secrets Manager">
+    ```json
+    "http": {
+      "auth": {
+        "bearer": {
+          "realm": "https://auth.myreg.io/auth/token",
+          "service": "myauth",
+          "awsSecretsManager": {
+            "region": "us-east-1",
+            "secretName": "zot/jwt-verification-keys",
+            "refreshInterval": "5m"
+          }
+        }
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+<ParamField path="http.auth.bearer.realm" type="string">
+  The token service URL that clients use to obtain tokens. It appears in the `WWW-Authenticate` challenge.
+</ParamField>
+<ParamField path="http.auth.bearer.service" type="string">
+  The name of the authentication service. `realm` and `service` must both be set for zot to advertise a Bearer challenge.
+</ParamField>
+<ParamField path="http.auth.bearer.cert" type="string">
+  Path to the public key or certificate that verifies token signatures. Needed for traditional JWT verification unless you use `awsSecretsManager` or only `oidc`. Mutually exclusive with `awsSecretsManager`.
+</ParamField>
+<ParamField path="http.auth.bearer.awsSecretsManager" type="object">
+  Load verification keys from AWS Secrets Manager. Mutually exclusive with `cert`. zot refuses to start if you set both.
+</ParamField>
+<ParamField path="http.auth.bearer.oidc" type="array">
+  Validate bearer tokens as OIDC ID tokens. See [workload identity](/security/openid#workload-identity-oidc-bearer).
+</ParamField>
+<ParamField path="http.auth.bearer.upstreamTokenEndpoint" type="object">
+  An external token service for credentials that zot doesn't own. See [Combining methods](#combining-methods).
+</ParamField>
+
+### Per-entry expiration in the JWT `access` claim
+
+As a zot extension to the [Distribution token authentication specification](https://distribution.github.io/distribution/spec/auth/jwt/), each entry in the JWT `access` claim can carry its own `exp` field. zot checks it in addition to the token's top-level `exp`. An expired entry is skipped during authorization even if the token itself is still valid.
+
+This is useful when one token grants access to repositories with different lifetimes, such as a subscription and a trial:
+
+```json
+{
+  "access": [
+    {
+      "type": "repository",
+      "name": "product-a",
+      "actions": ["pull"],
+      "exp": 1893456000
+    },
+    {
+      "type": "repository",
+      "name": "product-b-trial",
+      "actions": ["pull"],
+      "exp": 1705258800
+    }
+  ]
+}
+```
+
+After the `product-b-trial` entry expires, the token still grants pull access to `product-a` until the top-level `exp`. An entry without `exp` inherits the token's expiration.
+
+### Bearer authentication with AWS Secrets Manager
+
+Store JWT verification keys in AWS Secrets Manager and zot loads them dynamically. You can rotate keys without restarting zot and centralize key management across instances.
+
+<ParamField path="awsSecretsManager.region" type="string" required>
+  The AWS region where the secret is stored.
+</ParamField>
+<ParamField path="awsSecretsManager.secretName" type="string" required>
+  The name or ARN of the secret.
+</ParamField>
+<ParamField path="awsSecretsManager.refreshInterval" type="duration" default="1m">
+  How often zot refreshes the keys. Must not be negative.
+</ParamField>
+
+The secret is a JSON object that maps key IDs (`kid`) to verification keys. Each value is a PEM-encoded public key or a JWKS string with a single key.
+
+<CodeGroup>
+  ```json PEM keys
+  {
+    "key-id-1": "-----BEGIN PUBLIC KEY-----\n<base64-public-key>\n-----END PUBLIC KEY-----\n"
+  }
+  ```
+
+  ```json JWKS keys
+  {
+    "key-id-1": "{\"keys\":[{\"kty\":\"OKP\",\"crv\":\"Ed25519\",\"x\":\"<public-key>\"}]}"
+  }
+  ```
+</CodeGroup>
+
+zot supports Ed25519 (EdDSA), RSA (`RS*` and `PS*`), and ECDSA (`ES*`) keys. It picks the key that matches the `kid` in the JWT header, so every token must carry a `kid`:
+
+```json
+{
+  "alg": "EdDSA",
+  "kid": "key-id-1",
+  "typ": "JWT"
+}
+```
+
+**Rotate keys without downtime**
+
+<Steps>
+  <Step title="Add the new key">
+    Add it to the secret next to the existing keys.
+  </Step>
+  <Step title="Sign with the new key ID">
+    Update your token issuer to sign new tokens with the new `kid`.
+  </Step>
+  <Step title="Wait for the refresh">
+    Wait for `refreshInterval` so zot picks up the new key.
+  </Step>
+  <Step title="Remove the old key">
+    Remove it after tokens signed with it have expired.
+  </Step>
+</Steps>
+
+zot uses the default AWS credential chain: environment variables, the shared credentials file, IAM roles (EC2, ECS, EKS), or web identity tokens such as EKS IRSA. The principal needs `secretsmanager:GetSecretValue` on the secret:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "secretsmanager:GetSecretValue",
+      "Resource": "arn:aws:secretsmanager:us-east-1:123456789012:secret:zot/jwt-verification-keys-*"
+    }
+  ]
+}
+```
+
+<Tip>
+  Use least privilege, scope the policy to the one secret, and prefer a short `refreshInterval` (1 to 5 minutes) so rotations take effect quickly. If zot can't fetch or parse the secret, check the credentials, the IAM policy, and that tokens include a matching `kid`.
+</Tip>
+
+AWS Secrets Manager bearer authentication can coexist with [OIDC workload identity](/security/openid#workload-identity-oidc-bearer). zot accepts tokens validated either way.
+
+## Combining methods
+
+zot selects an authentication path from the credential style each client uses, so browsers, OCI clients, CI jobs, and workloads can share one registry. Supported combinations include:
+
+- OpenID browser sessions with API keys for Docker, Podman, containerd, kubelet, and scripts.
+- OpenID and API keys with bearer challenge settings, so OCI clients can exchange API keys for short-lived bearer tokens.
+- Workload OIDC tokens with OpenID sessions, API keys, or traditional signed bearer tokens.
+- htpasswd and LDAP, where either backend can validate basic credentials.
+- mTLS alongside any of the other methods.
+
+<Info>
+  Enabling OpenID automatically enables API keys, so users can authenticate Docker and other data-path clients. See [API keys](/security/api-keys).
+</Info>
+
+### Token endpoint and upstream token service
+
+When zot is the advertised token endpoint (`/zot/auth/token`), it exchanges zot-issued API keys and trusted workload OIDC tokens locally. An optional upstream token service handles credentials zot doesn't own:
+
+```json
+{
+  "http": {
+    "auth": {
+      "bearer": {
+        "realm": "https://zot.example.com/zot/auth/token",
+        "service": "zot.example.com",
+        "upstreamTokenEndpoint": {
+          "realm": "https://auth.example.com/token",
+          "service": "legacy-token-service"
+        }
+      }
+    }
+  }
+}
+```
+
+<ParamField path="upstreamTokenEndpoint.realm" type="string" required>
+  Absolute URL of the external token endpoint. It must use `https` unless `allowInsecureHttp` is `true`.
+</ParamField>
+<ParamField path="upstreamTokenEndpoint.service" type="string" required>
+  Service value sent to the external token endpoint. `realm` and `service` must be set together.
+</ParamField>
+<ParamField path="upstreamTokenEndpoint.allowInsecureHttp" type="boolean" default="false">
+  Allow a plain `http` realm. zot logs a warning because credentials may cross the network unencrypted. Use only for testing.
+</ParamField>
+
+zot never forwards zot-issued API keys, wrapped API-key tokens, workload OIDC tokens, or tokens from configured OpenID providers to `upstreamTokenEndpoint`. It rejects invalid credentials rather than retrying anonymously or proxying them upstream.
+
+### Request priority
+
+When a client presents a certificate, zot always validates it first. To authenticate the request and establish an identity, zot then follows this priority:
+
+1. If an `Authorization` header is present and basic authentication is enabled, zot attempts basic authentication.
+2. If an `Authorization` header is present but basic authentication is disabled, the request fails.
+3. If a session header is present (the web UI), zot attempts session authentication.
+4. If mTLS is enabled and client certificates are present, zot attempts mTLS authentication.
+5. If no authentication is configured, all requests are allowed.
+6. If anonymous access is configured, or the request is for a management endpoint, zot allows it.
+
+## Delay failed authentication
+
+To slow automated attacks, delay the response to a failed authentication:
+
+```json
+"http": {
+  "auth": {
+    "failDelay": 5
+  }
+}
+```
+
+<ParamField path="http.auth.failDelay" type="integer">
+  Seconds zot waits before it sends a failure response to a user who was denied access.
+</ParamField>
+
+## Docker client compatibility
+
+With basic authentication enabled (htpasswd, LDAP, or API keys) and a **mixed** access-control configuration, zot returns `401 Unauthorized` with `WWW-Authenticate: Basic realm="..."` on the `/v2/` ping to Docker clients. Docker then sends stored credentials on later requests to protected repositories. A mixed configuration has at least one anonymous repository policy **and** other policies that require an authenticated user.
+
+If every configured repository is anonymous-only, `/v2/` returns `200` without credentials.
+
+zot identifies Docker clients by `Docker-Client` in the `User-Agent` header. Podman and other OCI-compliant clients handle per-resource challenges and aren't affected.
+
+<Warning>
+  When this workaround applies, anonymous Docker users must run `docker login` before they use the registry, even for repositories that allow anonymous access.
+</Warning>
+
+Alternatives: use bearer token authentication instead of basic authentication, or use Podman or another OCI-compliant client. See [Docker client](/clients/docker) for details.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Access control" icon="user-lock" href="/security/access-control">
+    Decide what authenticated identities can do.
+  </Card>
+  <Card title="OpenID Connect" icon="id-badge" href="/security/openid">
+    Single sign-on and workload identity.
+  </Card>
+  <Card title="Mutual TLS" icon="certificate" href="/security/mtls">
+    Client certificate authentication.
+  </Card>
+  <Card title="API keys" icon="key" href="/security/api-keys">
+    Credentials for scripts and container tools.
+  </Card>
+</CardGroup>

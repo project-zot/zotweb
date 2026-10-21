@@ -1,0 +1,216 @@
+---
+title: "Amazon S3"
+description: "Store zot images in Amazon S3 or an S3-compatible object store, including credentials, permissions, and signed-URL redirects."
+icon: "cloud"
+---
+
+Configure an S3 bucket with the `storageDriver` attribute in the `storage` section.
+
+```json
+{
+  "storage": {
+    "rootDirectory": "/tmp/zot",
+    "dedupe": true,
+    "storageDriver": {
+      "name": "s3",
+      "rootdirectory": "/zot",
+      "region": "us-east-2",
+      "bucket": "zot-storage",
+      "secure": true,
+      "skipverify": false
+    },
+    "cacheDriver": {
+      "name": "dynamodb",
+      "endpoint": "http://localhost:4566",
+      "region": "us-east-2",
+      "cacheTablename": "MainTable"
+    }
+  }
+}
+```
+
+With deduplication on, remote storage needs a [cache driver](/configuration/storage/cache-drivers) (DynamoDB or Redis). The example above uses a local DynamoDB endpoint for testing.
+
+<Warning>
+  **S3 and Windows.** The S3 driver comes from the [distribution](https://github.com/distribution/distribution) project, which doesn't support Windows. On Windows, the driver receives paths with backslashes instead of the forward slashes S3 expects. This can make zot hang at startup, exhaust memory, and use high CPU. Don't use the S3 driver on Windows. Use local storage, or run zot on Linux or macOS.
+</Warning>
+
+## Driver settings
+
+These attributes go in `storage.storageDriver`. Names are lowercase, as the driver reads them.
+
+<ParamField path="name" type="string" required>
+  `s3`. Use it for Amazon S3 and S3-compatible object storage.
+</ParamField>
+<ParamField path="region" type="string" required>
+  The AWS region of your bucket.
+</ParamField>
+<ParamField path="bucket" type="string" required>
+  The bucket that stores registry data.
+</ParamField>
+<ParamField path="accesskey" type="string">
+  AWS access key ID. Omit it when you use IAM roles, environment variables, or a credentials file. See [credentials](#credentials).
+</ParamField>
+<ParamField path="secretkey" type="string">
+  AWS secret access key. Omit it for the same reasons as `accesskey`.
+</ParamField>
+<ParamField path="regionendpoint" type="string">
+  Endpoint for S3-compatible services such as MinIO. If you set it and omit `forcepathstyle`, zot sets `forcepathstyle` to `true` and logs a deprecation warning.
+</ParamField>
+<ParamField path="forcepathstyle" type="boolean" default="false">
+  Use path-style addressing. Set it to `true` for most S3-compatible services.
+</ParamField>
+<ParamField path="rootdirectory" type="string">
+  A prefix applied to all S3 keys, so you can segment data in a bucket.
+</ParamField>
+<ParamField path="secure" type="boolean" default="true">
+  Use HTTPS instead of HTTP.
+</ParamField>
+<ParamField path="skipverify" type="boolean" default="false">
+  Skip TLS verification.
+</ParamField>
+<ParamField path="encrypt" type="boolean" default="false">
+  Store objects encrypted.
+</ParamField>
+<ParamField path="keyid" type="string">
+  KMS key ID for encryption. Ignored unless `encrypt` is `true`.
+</ParamField>
+<ParamField path="v4auth" type="boolean" default="true">
+  Use AWS Signature Version 4.
+</ParamField>
+<ParamField path="chunksize" type="integer" default="10485760">
+  Multipart upload chunk size in bytes. S3 requires at least 5 MiB (`5 * 1024 * 1024`).
+</ParamField>
+<ParamField path="multipartcopychunksize" type="integer" default="33554432">
+  Chunk size, in bytes, for all but the last part when copying objects with multipart upload.
+</ParamField>
+<ParamField path="multipartcopymaxconcurrency" type="integer" default="100">
+  Maximum concurrent multipart operations when copying objects.
+</ParamField>
+<ParamField path="multipartcopythresholdsize" type="integer" default="33554432">
+  Object size, in bytes, above which multipart upload is used when copying objects.
+</ParamField>
+<ParamField path="storageclass" type="string" default="STANDARD">
+  S3 storage class applied to each registry file.
+</ParamField>
+<ParamField path="objectacl" type="string" default="private">
+  S3 canned ACL for objects.
+</ParamField>
+<ParamField path="useragent" type="string">
+  User-Agent header for S3 API operations.
+</ParamField>
+<ParamField path="usedualstack" type="boolean" default="false">
+  Use AWS dual-stack endpoints.
+</ParamField>
+<ParamField path="accelerate" type="boolean" default="false">
+  Enable S3 Transfer Acceleration.
+</ParamField>
+<ParamField path="loglevel" type="string" default="off">
+  Log level of the S3 client.
+</ParamField>
+<ParamField path="redirectendpoint" type="string">
+  Optional endpoint used when the driver builds signed redirect URLs. See [redirect blob pulls](#redirect-blob-pulls-to-backend-urls).
+</ParamField>
+
+For more, see the [S3 storage driver documentation](https://distribution.github.io/distribution/storage-drivers/s3/).
+
+## Credentials
+
+Prefer not to put `accesskey` and `secretkey` in the zot configuration file. Omit them and use one of these instead.
+
+<Tabs>
+  <Tab title="IAM role">
+    On AWS, attach an IAM role to the instance or pod. With both keys omitted, zot fetches temporary credentials from IAM.
+  </Tab>
+  <Tab title="Environment variables">
+    zot reads these variables:
+
+    ```bash
+    AWS_ACCESS_KEY_ID=<access-key-id>
+    AWS_SECRET_ACCESS_KEY=<secret-access-key>
+    AWS_SESSION_TOKEN=<session-token>  # optional
+    ```
+  </Tab>
+  <Tab title="Credentials file">
+    A plaintext file named `credentials` in the `.aws/` directory of the home directory of the user that runs zot:
+
+    ```ini ~/.aws/credentials
+    [default]
+    aws_access_key_id = <default-access-key-id>
+    aws_secret_access_key = <default-secret-access-key>
+
+    [prod-account]
+    aws_access_key_id = <prod-access-key-id>
+    aws_secret_access_key = <prod-secret-access-key>
+    ```
+
+    zot uses the `[default]` profile unless you choose another with `AWS_PROFILE`:
+
+    ```bash
+    AWS_PROFILE=prod-account
+    ```
+  </Tab>
+</Tabs>
+
+See the [AWS documentation](https://docs.aws.amazon.com/sdk-for-go/v1/developer-guide/configuring-sdk.html#specifying-credentials) for more.
+
+## Required S3 permissions
+
+zot needs this policy for push and pull. Replace `<S3_BUCKET_NAME>` with your bucket name.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket",
+        "s3:GetBucketLocation",
+        "s3:ListBucketMultipartUploads"
+      ],
+      "Resource": "arn:aws:s3:::<S3_BUCKET_NAME>"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:DeleteObject",
+        "s3:ListMultipartUploadParts",
+        "s3:AbortMultipartUpload"
+      ],
+      "Resource": "arn:aws:s3:::<S3_BUCKET_NAME>/*"
+    }
+  ]
+}
+```
+
+## Redirect blob pulls to backend URLs
+
+When `storage.redirectBlobURL` is `true` for a remote backend, zot can answer blob pull requests with `307 Temporary Redirect` to signed URLs from the storage driver. Clients then download directly from object storage.
+
+Typical reasons to enable it:
+
+- Reduce load and egress through zot for large blob downloads.
+- Let cloud object storage serve blob payloads directly.
+
+```json
+{
+  "storage": {
+    "rootDirectory": "/tmp/zot",
+    "storageDriver": {
+      "name": "s3",
+      "region": "us-east-2",
+      "bucket": "zot-storage"
+    },
+    "redirectBlobURL": true
+  }
+}
+```
+
+If the driver can't generate a valid redirect URL for a request, zot falls back to proxying the blob.
+
+<Note>
+  `redirectBlobURL` is supported only with `s3`, `gcs`, or `azure` storage. zot rejects the configuration with local storage. You can set it globally and per subpath.
+</Note>

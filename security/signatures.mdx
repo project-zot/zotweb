@@ -1,0 +1,264 @@
+---
+title: "Verify image signatures"
+description: "Verify cosign and notation signatures for images stored in zot."
+icon: "signature"
+---
+
+You can sign images stored in zot with a digital signature. zot verifies the signature with the public keys or certificates that you upload, so you can check the source and integrity of an image.
+
+zot supports these signing tools:
+
+- [cosign](https://docs.sigstore.dev/cosign/overview/)
+- [notation](https://github.com/notaryproject/notation)
+
+## Enable signature verification
+
+Add the `trust` extension to the zot configuration and enable one or both tools:
+
+```json
+"extensions": {
+  "trust": {
+    "enable": true,
+    "cosign": true,
+    "notation": true
+  }
+}
+```
+
+<ParamField path="extensions.trust.enable" type="boolean" default="false">
+  Set to `true` to turn on signature verification. If the attribute is missing, verification is disabled. You must also enable at least one tool.
+</ParamField>
+<ParamField path="extensions.trust.cosign" type="boolean">
+  Set to `true` to verify signatures made with cosign.
+</ParamField>
+<ParamField path="extensions.trust.notation" type="boolean">
+  Set to `true` to verify signatures made with notation.
+</ParamField>
+
+<Note>
+  The trust extension is part of the full zot image. See [Extensions](/concepts/extensions).
+</Note>
+
+## Upload keys and certificates
+
+To verify a signature, zot needs one of two things:
+
+- **For cosign:** the public key that pairs with the private key used to sign the image.
+- **For notation:** the certificate used to sign the image.
+
+Upload them through the zot API.
+
+<Warning>
+  Starting with v2.1.22, when authentication is enabled, the trust-key upload endpoints require an explicit matching `accessControl.adminPolicy`. See [Access control](/security/access-control).
+</Warning>
+
+<Tabs>
+  <Tab title="cosign public key">
+    ```bash
+    curl --data-binary @cosign.pub "http://localhost:8080/v2/_zot/ext/cosign"
+    ```
+
+    zot stores the key in the `_cosign` directory under the `rootDirectory` from your configuration, or in the Secrets Manager.
+  </Tab>
+  <Tab title="notation certificate">
+    ```bash
+    curl --data-binary @certificate.crt \
+      "http://localhost:8080/v2/_zot/ext/notation?truststoreType=ca"
+    ```
+
+    Set `truststoreType` to the kind of truststore. For a certificate authority, use `ca`, which is also the default if you omit the parameter.
+
+    zot stores the certificate in `_notation/truststore/x509/<truststoreType>/default` under `rootDirectory`, or in the Secrets Manager.
+  </Tab>
+</Tabs>
+
+### Where uploaded files are stored
+
+zot keeps uploaded files in the local filesystem under `$rootDir`, or in the Secrets Manager.
+
+<CodeGroup>
+  ```text _cosign
+  _cosign
+  ├── $publicKey1
+  └── $publicKey2
+  ```
+
+  ```text _notation
+  _notation
+  ├── trustpolicy.json
+  └── truststore
+      └── x509
+          └── $truststoreType
+              └── default
+                  └── $certificate
+  ```
+</CodeGroup>
+
+The `trustpolicy.json` file is updated automatically when you add a certificate to a new truststore. You can't change it. This is an example:
+
+```json
+{
+  "version": "1.0",
+  "trustPolicies": [
+    {
+      "name": "default-config",
+      "registryScopes": ["*"],
+      "signatureVerification": {
+        "level": "strict"
+      },
+      "trustStores": ["ca:default", "signingAuthority:default", "tsa:default"],
+      "trustedIdentities": ["*"]
+    }
+  ]
+}
+```
+
+- `signatureVerification.level` is `strict` by default, which enforces all validations. For example, a signature isn't trusted if its certificate has expired, even when the certificate verifies the signature.
+- The default truststores are `ca:default`, `signingAuthority:default`, and `tsa:default`. The `tsa` store verifies signatures that use a trusted timestamp authority. This list isn't updated when you upload a new certificate.
+- The `trustStores` field matches the contents of the `_notation/truststore` directory.
+
+## How verification works
+
+zot uses the uploaded files and the image data in its database to verify every signed image. It stores each result in the database, and you can read it through GraphQL. For each signature, zot records:
+
+- The **tool** that created it, such as `cosign` or `notation`.
+- Whether it's **trusted**, meaning a key or certificate exists that verifies it.
+- The **author**: the public key for cosign signatures, or the certificate subject for notation signatures.
+
+### Cosign v3 Sigstore bundles
+
+zot recognizes the Sigstore bundle format that cosign v3 produces, with artifact media type `application/vnd.dev.sigstore.bundle.v0.3+json`. zot finds these signatures through the OCI referrers API and includes them in verification and search metadata alongside legacy cosign signatures.
+
+zot verifies bundles against uploaded cosign public keys, like other key-based cosign signatures. You need no extra configuration beyond enabling cosign verification and uploading the public key.
+
+### Signatures and attestations
+
+Cosign attestations are OCI referrers, not image signatures. An attestation alone doesn't make zot report an image as signed. Legacy cosign signature and SBOM tags are recognized only in their complete canonical tag form.
+
+## Query signature status
+
+Use GraphQL to see the verification result for an image.
+
+<CodeGroup>
+  ```graphql Request
+  {
+    Image(image: "busybox:latest") {
+      Digest
+      IsSigned
+      Tag
+      SignatureInfo {
+        Tool
+        IsTrusted
+        Author
+      }
+    }
+  }
+  ```
+
+  ```json Response
+  {
+    "data": {
+      "Image": {
+        "Digest": "sha256:6c19fba547b87bde9a45df2f8563e0c61826d098dd30192a2c8b86da1e1a6360",
+        "IsSigned": true,
+        "Tag": "latest",
+        "SignatureInfo": [
+          {
+            "Tool": "cosign",
+            "IsTrusted": false,
+            "Author": ""
+          },
+          {
+            "Tool": "cosign",
+            "IsTrusted": true,
+            "Author": "-----BEGIN PUBLIC KEY-----\n<public key>\n-----END PUBLIC KEY-----\n"
+          },
+          {
+            "Tool": "notation",
+            "IsTrusted": false,
+            "Author": "CN=v4-test,O=Notary,L=Seattle,ST=WA,C=US"
+          },
+          {
+            "Tool": "notation",
+            "IsTrusted": true,
+            "Author": "CN=multipleSig,O=Notary,L=Seattle,ST=WA,C=US"
+          }
+        ]
+      }
+    }
+  }
+  ```
+</CodeGroup>
+
+See [Search with GraphQL](/use/search-graphql) for more queries.
+
+## Signature storage and MetaDB
+
+Starting with v2.1.22, zot reads signature payloads from blob storage. It no longer copies those layer bytes into MetaDB.
+
+Older MetaDB records may keep the duplicated content until the repository record is updated again, for example after a pull or a signature change. Verification works either way, so reclaiming space is optional.
+
+If you use the local BoltDB MetaDB (`meta.db` under `storage.rootDirectory`) and the file is large, you can reclaim space. Redis and DynamoDB MetaDB backends aren't affected.
+
+<Warning>
+  Avoid downgrading after v2.1.22 has rewritten metadata. Earlier releases can expect signature content to be embedded in MetaDB.
+</Warning>
+
+<AccordionGroup>
+  <Accordion title="Option A: compact meta.db (keeps search metadata and user data)">
+    `bbolt compact` copies every live key and value. It only reclaims freelist pages left after repository records were rewritten without the old payloads. Untouched legacy records still contain those payloads and survive compaction. Prefer this option after normal traffic has rewritten the large repositories. Use Option B to drop every leftover payload at once.
+
+    <Steps>
+      <Step title="Install bbolt">
+        ```bash
+        go install go.etcd.io/bbolt/cmd/bbolt@latest
+        ```
+        See [`go.etcd.io/bbolt`](https://pkg.go.dev/go.etcd.io/bbolt).
+      </Step>
+      <Step title="Stop zot">
+        Make sure nothing writes to the database.
+      </Step>
+      <Step title="Compact a copy">
+        In the storage root directory that contains `meta.db`:
+
+        ```bash
+        bbolt compact -o meta.db.new meta.db
+        ```
+      </Step>
+      <Step title="Swap the files">
+        ```bash
+        mv meta.db meta.db.bak && mv meta.db.new meta.db
+        chown zot:zot meta.db
+        ```
+        The new file must be owned by the zot process user.
+      </Step>
+      <Step title="Start zot and verify">
+        Confirm the registry is healthy, then remove `meta.db.bak`.
+      </Step>
+    </Steps>
+  </Accordion>
+  <Accordion title="Option B: recreate meta.db (full metadata rebuild)">
+    <Warning>
+      Removing `meta.db` also deletes data that storage can't rebuild, including API keys, user stars and bookmarks, and download statistics. Keep the backup until you're sure you don't need that state.
+
+      On start, zot walks storage and rebuilds repository metadata before it becomes ready, so the registry is unavailable during that time. On a large registry, a `Type=notify` systemd unit can hit its startup timeout. Raise `TimeoutStartSec` or use `Type=simple` for that restart.
+    </Warning>
+
+    <Steps>
+      <Step title="Stop zot">
+        Stop the service.
+      </Step>
+      <Step title="Move meta.db aside">
+        ```bash
+        mv meta.db meta.db.bak
+        ```
+      </Step>
+      <Step title="Start zot">
+        zot creates a new `meta.db` and rebuilds repository metadata from storage before serving traffic.
+      </Step>
+      <Step title="Remove the backup">
+        Once you're satisfied, delete `meta.db.bak`.
+      </Step>
+    </Steps>
+  </Accordion>
+</AccordionGroup>

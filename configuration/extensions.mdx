@@ -1,0 +1,333 @@
+---
+title: "Enable extensions"
+description: "Turn on and configure search, UI, sync, scrub, lint, metrics, image trust, and events."
+icon: "toggle-on"
+---
+
+[Extensions](/concepts/extensions) add features that aren't part of the OCI Distribution Specification. You enable and configure most of them under the `extensions` key.
+
+<Warning>
+  Extensions are available only in the **full** zot binary or image. A minimal build ignores the `extensions` section.
+</Warning>
+
+## Enable and disable an extension
+
+An extension is on when its key appears under `extensions`. Turn it off by removing the key or by setting `enable` to `false`. These two configurations both enable scrub:
+
+<CodeGroup>
+  ```json Key present
+  "extensions": {
+    "scrub": {}
+  }
+  ```
+
+  ```json Explicit
+  "extensions": {
+    "scrub": {
+      "enable": true
+    }
+  }
+  ```
+</CodeGroup>
+
+These both disable it:
+
+<CodeGroup>
+  ```json Key omitted
+  "extensions": {}
+  ```
+
+  ```json Explicit
+  "extensions": {
+    "scrub": {
+      "enable": false
+    }
+  }
+  ```
+</CodeGroup>
+
+<Note>
+  `lint` and `events` don't default to on. For those two, always set `enable` explicitly.
+</Note>
+
+## Extensions at a glance
+
+| Extension | Key | Purpose | Details |
+|---|---|---|---|
+| Search | `extensions.search` | GraphQL image search and CVE scanning | [Search](#search) |
+| Web UI | `extensions.ui` | Browser interface. Requires `search`. | [Web UI](#web-ui) |
+| Sync | `extensions.sync` | Mirror other registries | [Sync](#sync) |
+| Scrub | `extensions.scrub` | Periodic data integrity checks | [Scrub](#scrub) |
+| Lint | `extensions.lint` | Enforce required annotations on push | [Lint](#lint) |
+| Metrics | `extensions.metrics` | Prometheus metrics | [Metrics](#metrics) |
+| Image trust | `extensions.trust` | Verify cosign and notation signatures | [Image trust](#image-trust) |
+| Events | `extensions.events` | Publish registry events | [Events](#events) |
+| User preferences | none | Stars and bookmarks. On with `search` and `ui`. | [Automatic extensions](#automatic-extensions) |
+| Management API | none | Read the active configuration. On with `search`. | [Automatic extensions](#automatic-extensions) |
+
+## Search
+
+Basic search always works through the core APIs. Add the `search` key to enable enhanced search and filtering with GraphQL. Add a `cve` object to also enable [vulnerability scanning](/security/cve-scanning).
+
+```json
+"extensions": {
+  "search": {
+    "enable": true,
+    "cve": {
+      "updateInterval": "2h"
+    }
+  }
+}
+```
+
+<ParamField path="extensions.search.enable" type="boolean" default="true">
+  Defaults to `true` when the `search` key is present. Set it to `false` to disable enhanced search.
+</ParamField>
+
+<ParamField path="extensions.search.cve" type="object">
+  Turns on CVE scanning with Trivy. Present means enabled.
+</ParamField>
+
+<ParamField path="extensions.search.cve.updateInterval" type="duration" default="2h">
+  How often zot refreshes the Trivy vulnerability databases. It controls database updates, not how often images are scanned. The minimum is `2h`. A shorter value is raised to `2h` with a warning.
+</ParamField>
+
+<ParamField path="extensions.search.cve.trivy.dbRepository" type="string" default="ghcr.io/aquasecurity/trivy-db">
+  Registry location of the Trivy vulnerability database.
+</ParamField>
+
+<ParamField path="extensions.search.cve.trivy.javaDBRepository" type="string" default="ghcr.io/aquasecurity/trivy-java-db">
+  Registry location of the Trivy Java vulnerability database.
+</ParamField>
+
+<ParamField path="extensions.search.cve.trivy.ignoreFile" type="string">
+  Path to a Trivy ignore file, like Trivy's `--ignorefile`. The file must exist and be a regular file, or zot refuses to start.
+</ParamField>
+
+<ParamField path="extensions.search.cve.trivy.vulnSeveritySources" type="array of string" default='["auto"]'>
+  Severity sources, like Trivy's `--vuln-severity-source`.
+</ParamField>
+
+<ParamField path="extensions.search.cve.trivy.detectionPriority" type="string" default="precise">
+  Like Trivy's `--detection-priority`. Use `precise` or `comprehensive`.
+</ParamField>
+
+<ParamField path="extensions.search.cve.trivy.scanRemovedPkgs" type="boolean" default="false">
+  Like Trivy's `--removed-pkgs`.
+</ParamField>
+
+<ParamField path="extensions.search.cve.trivy.includeDevDeps" type="boolean" default="false">
+  Like Trivy's `--include-dev-deps`.
+</ParamField>
+
+<ParamField path="extensions.search.cve.trivy.sbom.enable" type="boolean" default="false">
+  Generate an SBOM artifact for scanned images.
+</ParamField>
+
+<ParamField path="extensions.search.cve.trivy.sbom.format" type="string" default="spdx-json">
+  SBOM format: `spdx-json` or `cyclonedx`.
+</ParamField>
+
+<Warning>
+  CVE scanning doesn't work with remote storage. If any `storageDriver` (S3, GCS, or Azure) is configured and `cve` is set, zot refuses to start with `failed to enable cve scanning due to incompatibility with remote storage`. Remove `cve` or use local storage.
+</Warning>
+
+See [Search with GraphQL](/use/search-graphql) and [CVE scanning](/security/cve-scanning) for usage and more examples.
+
+## Web UI
+
+```json
+"extensions": {
+  "search": {},
+  "ui": {
+    "enable": true
+  }
+}
+```
+
+<ParamField path="extensions.ui.enable" type="boolean" default="true">
+  Defaults to `true` when the `ui` key is present.
+</ParamField>
+
+<Warning>
+  The UI needs the `search` extension. If you enable `ui` without `search`, zot refuses to start with `failed to enable ui, search extension must be enabled`.
+</Warning>
+
+See [Web UI](/use/web-ui).
+
+## Sync
+
+Sync mirrors images and artifacts from one or more upstream registries, on demand or on a schedule.
+
+```json
+"extensions": {
+  "sync": {
+    "registries": [
+      {
+        "urls": ["https://index.docker.io"],
+        "onDemand": true
+      }
+    ]
+  }
+}
+```
+
+<ParamField path="extensions.sync.enable" type="boolean" default="true">
+  Defaults to `true` when the `sync` key is present.
+</ParamField>
+
+<ParamField path="extensions.sync.registries" type="array of object">
+  The upstream registries and their download policies.
+</ParamField>
+
+Sync has many options, including credentials, content filters, polling, retries, platforms, and signature checks. They're covered in [Mirroring and sync](/operations/mirroring). To sync Docker-format images, also set [`http.compat`](/configuration/http#docker-image-format-compatibility).
+
+## Scrub
+
+Scrub verifies the integrity of stored data on a schedule by traversing the storage and checking that data is readable. While it runs, it can slightly reduce registry performance.
+
+```json
+"extensions": {
+  "scrub": {
+    "enable": true,
+    "interval": "24h"
+  }
+}
+```
+
+<ParamField path="extensions.scrub.enable" type="boolean" default="true">
+  Defaults to `true` when the `scrub` key is present. Set it to `false` to disable scrubbing.
+</ParamField>
+
+<ParamField path="extensions.scrub.interval" type="duration" default="24h">
+  Time between scrub runs. The minimum is `2h`. A shorter value is raised to `2h` with a warning.
+</ParamField>
+
+See [Background tasks](/configuration/background-tasks#scrub) for the one-off `zot scrub` command.
+
+## Lint
+
+Lint checks each pushed image and denies the push if required annotations are missing.
+
+```json
+"extensions": {
+  "lint": {
+    "enable": true,
+    "mandatoryAnnotations": ["annot1", "annot2", "annot3"]
+  }
+}
+```
+
+<ParamField path="extensions.lint.enable" type="boolean" required>
+  Set this to `true` to turn linting on. Always set it explicitly: unlike other extensions, `lint` doesn't default to enabled when its key is present.
+</ParamField>
+
+<ParamField path="extensions.lint.mandatoryAnnotations" type="array of string">
+  Annotations that must appear in the manifest's annotations. If any are missing, zot denies the push.
+</ParamField>
+
+## Metrics
+
+Metrics are exposed in Prometheus format. The full image includes a node exporter. For a minimal image, use the separate `zxp` exporter. See [Monitoring](/operations/monitoring).
+
+```json
+"extensions": {
+  "metrics": {
+    "enable": true,
+    "prometheus": {
+      "path": "/metrics"
+    }
+  }
+}
+```
+
+<ParamField path="extensions.metrics.enable" type="boolean" default="true">
+  Defaults to `true` when the `metrics` key is present.
+</ParamField>
+
+<ParamField path="extensions.metrics.prometheus.path" type="string" default="/metrics">
+  The URL path that serves metrics. It must start with `/`, must be a clean path with no trailing slash or `..`, and can't be `/` or `/v2`.
+</ParamField>
+
+To restrict who can read metrics, set `http.accessControl.metrics`. See [Access control](/security/access-control).
+
+## Image trust
+
+The `trust` extension verifies image signatures with certificates and public keys that you upload through the zot API.
+
+```json
+"extensions": {
+  "trust": {
+    "enable": true,
+    "cosign": true,
+    "notation": true
+  }
+}
+```
+
+<ParamField path="extensions.trust.enable" type="boolean" default="true">
+  Defaults to `true` when the `trust` key is present.
+</ParamField>
+
+<ParamField path="extensions.trust.cosign" type="boolean" default="false">
+  Verify cosign signatures, using uploaded public keys.
+</ParamField>
+
+<ParamField path="extensions.trust.notation" type="boolean" default="false">
+  Verify notation signatures, using uploaded certificates.
+</ParamField>
+
+See [Verify image signatures](/security/signatures).
+
+## Events
+
+The `events` extension publishes registry events, such as image updates, to HTTP webhooks or NATS.
+
+```json
+"extensions": {
+  "events": {
+    "enable": true,
+    "sinks": [
+      {
+        "type": "nats",
+        "address": "nats://127.0.0.1:4222",
+        "timeout": "10s",
+        "channel": "alerts"
+      }
+    ]
+  }
+}
+```
+
+<ParamField path="extensions.events.enable" type="boolean">
+  Set to `true` to publish events.
+</ParamField>
+
+<ParamField path="extensions.events.sinks" type="array of object">
+  Where to send events. Each sink has a `type` (`http` or `nats`), an `address`, and a `timeout`. A NATS sink also takes a `channel`. Sinks also support `proxy`, `headers`, `credentials` (`username`, `password`, `file`, or `token`), and TLS files (`caCertFile`, `certFile`, `keyFile`).
+</ParamField>
+
+<ParamField path="extensions.events.source" type="string">
+  Overrides the CloudEvents `source` on every event this instance publishes. Set it to tell deployments or tenants apart.
+</ParamField>
+
+<ParamField path="extensions.events.typePrefix" type="string">
+  Overrides the namespace for event types, so `image.updated` becomes `<typePrefix>.image.updated`. It can't start or end with a dot or contain `..`.
+</ParamField>
+
+See [Events](/operations/events).
+
+## Automatic extensions
+
+Two API-only extensions have no settings of their own.
+
+- **User preferences** is on when both `search` and `ui` are enabled. It lets signed-in users star and bookmark repositories in the web UI.
+- **Management API** (`/v2/_zot/ext/mgmt`) is on when `search` is enabled. It returns a stripped view of the current configuration.
+
+<Note>
+  The `extensions.mgmt` and `extensions.apikey` keys are redundant. zot ignores them and logs a warning. Enable API keys with [`http.auth.apikey`](/security/api-keys) instead.
+</Note>
+
+## Build-time options
+
+Some capabilities are compiled in rather than configured. For example, the profiling endpoints exist only in binaries built with the `profile` label, and only administrators can reach them. See [Profile performance](/operations/profiling) and [Develop extensions](/developers/extensions).

@@ -1,0 +1,132 @@
+---
+title: "Configuration overview"
+description: "How the zot configuration file is structured, how to verify it, and which changes apply without a restart."
+icon: "file-code"
+---
+
+You configure zot with a single JSON or YAML file. It controls the network, storage, authentication, authorization, logging, extensions, and clustering.
+
+## Run zot with a configuration file
+
+Start zot with the `serve` command and the path to your file:
+
+```bash
+zot serve config.json
+```
+
+<Note>
+  The documentation uses `zot` as the name of the executable and omits its path. See [Releases and images](/install/releases) to rename a downloaded binary.
+</Note>
+
+The container images ship with a default `/etc/zot/config.json`. A binary doesn't create a configuration file, so you write your own. The smallest useful file looks like this:
+
+```json
+{
+  "distSpecVersion": "1.1.1",
+  "storage": {
+    "rootDirectory": "/tmp/zot"
+  },
+  "http": {
+    "address": "127.0.0.1",
+    "port": "8080"
+  },
+  "log": {
+    "level": "debug"
+  }
+}
+```
+
+<Info>
+  `distSpecVersion` records the OCI Distribution Specification version. If it differs from the version zot implements, zot logs a warning and uses its own version.
+</Info>
+
+## Verify the configuration
+
+Check a file before you launch zot. Verification catches syntax errors, invalid values, and conflicts that a new release can introduce.
+
+```bash
+zot verify config.json
+```
+
+Then launch:
+
+```bash
+zot serve config.json
+```
+
+## Top-level sections
+
+| Section | What it controls | Page |
+|---|---|---|
+| `storage` | Where images are stored, deduplication, garbage collection, retention, and remote backends | [Storage overview](/configuration/storage/overview) |
+| `http` | Listener address and port, TLS, `realm`, CORS, timeouts, compatibility mode, rate limiting | [HTTP and TLS](/configuration/http) |
+| `http.auth` | Authentication methods | [Authentication](/security/authentication) |
+| `http.accessControl` | Authorization policies | [Access control](/security/access-control) |
+| `log` | Log level, output file, audit log | [Logging](/configuration/logging) |
+| `extensions` | Optional features such as search, UI, sync, scrub, lint, metrics, trust, and events | [Enable extensions](/configuration/extensions) |
+| `scheduler` | Concurrency of background tasks | [Background tasks](/configuration/background-tasks) |
+| `cluster` | Scale-out cluster membership | [Scale-out clustering](/operations/clustering/scale-out) |
+
+## Defaults
+
+zot applies these defaults when you omit a setting:
+
+| Setting | Default |
+|---|---|
+| `http.address` | `127.0.0.1` |
+| `http.port` | `8080` |
+| `http.readTimeout` | `60s` |
+| `http.writeTimeout` | `60s` |
+| `log.level` | `debug` |
+| `log.output` | Standard output |
+| `storage.dedupe` | `true` |
+| `storage.gc` | `true` |
+| `storage.gcDelay` | `1h` |
+| `storage.gcInterval` | `1h` |
+| `scheduler.numWorkers` | 4 × the number of CPUs available to zot |
+
+<Tip>
+  Set `log.level` to `info` in production. The default `debug` is verbose.
+</Tip>
+
+## Keep secrets out of the main file
+
+You can store sensitive values, such as LDAP bind credentials and OpenID client secrets, in separate files that the main file references with `credentialsFile`. Separate files let you apply stricter permissions, and they work with [Kubernetes Secrets](https://kubernetes.io/docs/concepts/configuration/secret/).
+
+## Reload configuration without a restart
+
+zot watches its configuration file and applies supported changes while it runs. This includes ConfigMap-mounted files in Kubernetes. ConfigMap volumes update by atomically replacing symlink targets, and zot detects those replacements, so you don't need to restart the pod.
+
+These settings reload:
+
+- **Storage:** `gc`, `gcDelay`, `gcInterval`, `gcTimeWindow`, `dedupe`, `redirectBlobURL`, `hydrateBlobOnRead`, and `retention`, including for `subPaths` that already exist.
+- **Authentication:** `htpasswd`, `ldap`, `apikey`, `openid`, `secureSession`, and `mtls`.
+- **Authorization:** the whole `accessControl` section.
+- **Extensions:** `sync`, `scrub`, `events`, and the `cve` settings of `search`.
+
+Other changes, such as the listener address and port, TLS, `log`, `storage.rootDirectory`, and `cluster`, need a restart. zot logs a warning for them and keeps using the previous values. After you edit the file, check the logs to confirm that your intended settings were applied.
+
+<Note>
+  A reload stops and restarts the background tasks, including garbage collection and sync, so they pick up the new settings. If the new file is invalid, zot logs an error and keeps running with the previous configuration.
+</Note>
+
+## Extensions are for the full image
+
+Settings under `extensions` take effect only with a full zot binary or image. A minimal build ignores the section. See [Extensions](/concepts/extensions) and [Enable extensions](/configuration/extensions).
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Configuration examples" icon="copy" href="/configuration/examples">
+    Ready-to-use configurations for common scenarios.
+  </Card>
+  <Card title="HTTP and TLS" icon="globe" href="/configuration/http">
+    Listener, TLS, compatibility, and rate limiting.
+  </Card>
+  <Card title="Enable extensions" icon="toggle-on" href="/configuration/extensions">
+    Search, UI, sync, scrub, and more.
+  </Card>
+  <Card title="Production checklist" icon="clipboard-check" href="/operations/production-checklist">
+    What to set before you go live.
+  </Card>
+</CardGroup>

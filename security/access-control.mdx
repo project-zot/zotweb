@@ -1,0 +1,275 @@
+---
+title: "Access control"
+description: "Write identity-based, repository-level authorization policies with users, groups, anonymous access, admin policies, and conditions."
+icon: "user-lock"
+---
+
+Authentication alone gives every authenticated user complete access to the registry. To control access, zot supports identity-based, repository-level authorization policies. A policy is a function of the **repository**, the **user**, and the **action** being performed.
+
+Configure policies under `http.accessControl`. You need an [authentication method](/security/authentication) to identify users. The one exception is a configuration that has only anonymous policies.
+
+## Policy types
+
+| Policy | Attribute | What it allows |
+|---|---|---|
+| Default | `defaultPolicy` | Actions allowed for any authenticated user who doesn't match a user or group policy. |
+| User-specific | `users` and `actions` | Actions for explicitly named users. |
+| Group-specific | `groups` and `actions` | Actions for explicitly named groups. |
+| Anonymous | `anonymousPolicy` | Actions allowed without authentication, such as open read-only access. |
+| Metrics | `metrics` | Who can read the metrics endpoint. |
+| Admin | `adminPolicy` | A global policy that allows actions on **any** repository. |
+
+Most users of a repository have similar needs, so a repository-specific `defaultPolicy` covers them. Add a user-specific or group-specific policy for exceptions. Use `anonymousPolicy` for open access, and name administrators in the global `adminPolicy`.
+
+### Evaluation order
+
+For a repository, zot evaluates a user's access in this order and stops at the first policy that allows the action:
+
+1. User-specific policies that name the user.
+2. Group-specific policies for the user's groups.
+3. The `defaultPolicy` (authenticated users) or `anonymousPolicy` (unauthenticated requests).
+4. The global `adminPolicy`.
+
+A group-specific policy can appear in any policy type, including the default and admin policies. Group names can come from `accessControl.groups`, [LDAP](/security/ldap), or an [OpenID provider](/security/openid).
+
+## Actions
+
+<ParamField path="actions" type="string[]">
+  Any combination of `read`, `create`, `update`, and `delete`.
+</ParamField>
+
+<Warning>
+  Always include `read` in any policy that you define. You can't use `create`, `update`, or `delete` without `read`.
+</Warning>
+
+## Repository paths
+
+You can name repository paths explicitly or with `glob` patterns that use simple or recursive wildcards, for example `infra/*` (one level) and `tmp/**` (any depth).
+
+When a repository matches more than one pattern, zot applies the **longest**, most specific pattern. For example, with policies for `**` and `repos2/repo`, the path `repos2/repo` matches both, and zot applies the `repos2/repo` policy because it's longer.
+
+The pattern `**` matches any path that no other pattern matches, so it acts as the default for all repositories. To override every other policy, define a global `adminPolicy`.
+
+### Per-user namespaces
+
+Use the `${username}` placeholder in a pattern to give each authenticated user a private namespace:
+
+```json
+"accessControl": {
+  "repositories": {
+    "${username}/**": {
+      "defaultPolicy": ["read", "create", "update"]
+    }
+  }
+}
+```
+
+For a user named `alice`, zot expands this pattern to `alice/**`. Usernames that aren't valid repository name components, and anonymous users, never expand the placeholder.
+
+## Example
+
+```json
+"http": {
+  "accessControl": {
+    "groups": {
+      "group1": {
+        "users": ["bob", "mary"]
+      },
+      "group2": {
+        "users": ["alice", "mallory", "jim"]
+      }
+    },
+    "metrics": {
+      "users": ["john"]
+    },
+    "repositories": {
+      "**": {
+        "policies": [
+          {
+            "users": ["charlie"],
+            "groups": ["group2"],
+            "actions": ["read", "create", "update"]
+          }
+        ],
+        "defaultPolicy": ["read", "create"]
+      },
+      "tmp/**": {
+        "anonymousPolicy": ["read"],
+        "defaultPolicy": ["read", "create", "update"]
+      },
+      "infra/*": {
+        "policies": [
+          {
+            "users": ["alice", "bob"],
+            "actions": ["create", "read", "update", "delete"]
+          },
+          {
+            "users": ["mallory"],
+            "groups": ["group1"],
+            "actions": ["create", "read"]
+          }
+        ],
+        "defaultPolicy": ["read"]
+      },
+      "repos2/repo": {
+        "policies": [
+          {
+            "users": ["bob"],
+            "actions": ["read", "create"]
+          },
+          {
+            "users": ["mallory"],
+            "actions": ["create", "read"]
+          }
+        ],
+        "defaultPolicy": ["read"]
+      }
+    },
+    "adminPolicy": {
+      "users": ["admin"],
+      "actions": ["read", "create", "update", "delete"]
+    }
+  }
+}
+```
+
+This configuration defines:
+
+- The `**` policy: all authenticated users can read and create content. User `charlie` and members of `group2` can also update.
+- The `tmp/**` policy: all authenticated users can read, create, and update content in repositories under `tmp`, at any depth. Unauthenticated users can only read.
+- The `infra/*` policy: matches repositories directly under `infra`. Named users and group members get specific actions. Everyone else can read.
+- The `repos2/repo` policy: matches only that repository.
+- The `adminPolicy`: user `admin` can read, create, update, and delete in any repository, overriding all other policies.
+- The `metrics` policy: user `john` can read the metrics endpoint.
+
+<Note>
+  Authorization policies live under the `repositories` key. Before zot v2.0.0, policies were defined directly under `accessControl`.
+</Note>
+
+## Reference
+
+<ParamField path="accessControl.repositories" type="object">
+  Map of repository path pattern to policy group. Each group can contain:
+
+  - `policies`: list of policy entries with `users`, `groups`, `actions`, and optional `conditions`.
+  - `defaultPolicy`: actions for authenticated users that no other policy covers.
+  - `anonymousPolicy`: actions for unauthenticated users.
+</ParamField>
+<ParamField path="accessControl.groups" type="object">
+  Named groups, each with a `users` list. Use group names in `groups` fields.
+</ParamField>
+<ParamField path="accessControl.adminPolicy" type="object">
+  A global policy with `users`, `groups`, `actions`, and optional `conditions`. It applies to every repository.
+</ParamField>
+<ParamField path="accessControl.metrics" type="object">
+  Who can read the metrics endpoint. Contains `users` and `anonymousPolicy`.
+</ParamField>
+<ParamField path="accessControl.disableAnonymousCatalog" type="boolean" default="false">
+  When `true`, unauthenticated requests to `/v2/_catalog` return `401` even if an `anonymousPolicy` would allow listing. The search extension's repository listings also return empty results for unauthenticated requests.
+</ParamField>
+
+### Groups and LDAP
+
+For LDAP groups, use the group's full distinguished name in the zot configuration, for example `"groups": ["cn=ldap-group,ou=Groups,dc=example,dc=org"]`. See [LDAP](/security/ldap).
+
+### Metrics access
+
+The `metrics` policy controls who can read the metrics endpoint. If `metrics.anonymousPolicy` allows `read`, unauthenticated requests can read metrics. Authenticated users that the metrics policy doesn't list are still denied. See [Monitoring](/operations/monitoring).
+
+## Admin-only routes
+
+The profiling endpoints under `/v2/_zot/pprof/` and the cosign and notation trust-key upload endpoints need an identity that matches `accessControl.adminPolicy` whenever any authentication method is enabled. zot evaluates the policy's users, groups, and conditions for each request.
+
+<Warning>
+  **Upgrade impact (v2.1.22):** this is stricter than repository access. If you configure authentication without `accessControl`, authenticated users can use repositories, but nobody can use these routes. Add an explicit `adminPolicy` for your administrators.
+</Warning>
+
+- Unauthenticated requests receive `401 Unauthorized`.
+- An authenticated identity that doesn't match the policy receives `403 Forbidden`.
+- Traditional [bearer tokens](/security/authentication#bearer-token-authentication) authorize repository scopes rather than zot users and groups, so they can't match `adminPolicy`. Administrators must use an identity-based method such as an API key, OpenID session, workload OIDC token, htpasswd, LDAP, or mTLS.
+- When authentication is disabled, these routes are open like the rest of the registry.
+
+## Cross-repository blob mounts
+
+Cross-repository dedupe mounts need **read** access to a source repository that contains the blob, as well as **create** access to the destination repository (v2.1.21 and later). See [Upgrade zot](/install/upgrade) for related behavior changes.
+
+## Conditional policies with CEL
+
+A policy entry can have `conditions`, each a [CEL](https://github.com/google/cel-spec) boolean expression. All conditions must be true for the entry to grant access. If a condition is false or can't be evaluated, zot ignores that entry. This lets you grant access that depends on time, network, or request context.
+
+```json
+{
+  "users": ["alice"],
+  "actions": ["read", "create"],
+  "conditions": [
+    {
+      "expression": "req.time < timestamp(\"2099-12-31T23:59:59Z\")",
+      "message": "alice's prod access expires end of 2099"
+    }
+  ]
+}
+```
+
+<ParamField path="conditions[].expression" type="string (CEL)" required>
+  A boolean expression evaluated against the request.
+</ParamField>
+<ParamField path="conditions[].message" type="string">
+  Returned to the client under `reason` in the `403` response when the expression is false. zot also logs it. Internal evaluation failures aren't exposed. The client gets a generic denial.
+</ParamField>
+
+Expressions can read these fields from `req`:
+
+| Field | Meaning |
+|---|---|
+| `req.time` | Current time as a CEL timestamp. Compare with `timestamp("...")`. |
+| `req.action` | The abstract action: `read`, `create`, `update`, or `delete`. Use it to gate actions. |
+| `req.method` | The raw HTTP method, for example `GET` or `PUT`. |
+| `req.userAgent` | The `User-Agent` header. |
+| `req.repository` | The requested repository, when known. |
+| `req.reference`, `req.referenceType` | The tag or digest, and whether it's `"tag"`, `"digest"`, or `""`. |
+| `req.tag`, `req.digest` | The tag or digest, when the reference is one. |
+| `req.user.username`, `req.user.groups` | The authenticated username and groups. |
+| `req.auth.anonymous`, `req.auth.admin` | Whether the request is anonymous, and whether the user matches the admin policy. |
+| `req.client.ip`, `req.client.forwardedFor` | Client network information. See below. |
+| `req.tls.enabled`, `req.tls.version` | Whether the request arrived over TLS, and the version such as `"1.3"`. |
+| `req.claims` | Claims from the active authentication flow. Today, OIDC bearer tokens populate it. |
+
+Conditions on `adminPolicy` apply to the blanket admin grant, so you can require TLS, restrict to a CIDR, or limit to a time window.
+
+### Network conditions and trusted proxies
+
+- `req.client.ip` is the TCP peer address. For direct connections, use it for IP-based authorization. Behind a reverse proxy, it's the proxy's address.
+- `req.client.forwardedFor` holds the `X-Forwarded-For` values. These are **untrusted**, because any client can set or spoof that header.
+
+<Warning>
+  Never grant access based only on `req.client.forwardedFor`. A client that can reach zot directly can satisfy such a condition with a forged header.
+</Warning>
+
+<CodeGroup>
+  ```cel Insecure
+  // INSECURE: bypassable with a spoofed X-Forwarded-For header.
+  req.client.forwardedFor.exists(ip, ip.startsWith("10."))
+  ```
+
+  ```cel Direct connection
+  req.client.ip.startsWith("10.")
+  ```
+
+  ```cel Behind a trusted proxy
+  req.client.ip == "10.0.0.5" &&
+  req.client.forwardedFor.size() > 0 &&
+  req.client.forwardedFor[0].startsWith("192.0.2.")
+  ```
+</CodeGroup>
+
+When zot is behind a reverse proxy, first check that `req.client.ip` is a known, trusted proxy, then inspect the forwarded chain. The proxy must overwrite client-supplied `X-Forwarded-For` values instead of appending to an untrusted chain. Restrict direct network access to zot so clients can't bypass the proxy.
+
+## Changes without a restart
+
+zot watches its configuration file and reloads it when it changes. It doesn't reload on `SIGHUP`. That signal shuts zot down. Changes to `accessControl` (policies, groups, `adminPolicy`, `metrics`, and `disableAnonymousCatalog`) take effect without a restart. zot also reloads the `htpasswd`, LDAP, API key, OpenID, and mTLS authentication settings.
+
+## Related
+
+- [Authentication overview](/security/authentication)
+- [LDAP](/security/ldap) and [OpenID Connect](/security/openid) for group sources
+- [Immutable tags](/security/immutable-tags)
