@@ -1,0 +1,60 @@
+---
+title: "Client compatibility"
+description: "Clients and tools that work with zot, what is tested in CI, and what to watch for."
+icon: "circle-check"
+---
+
+zot implements the OCI Distribution Specification, so any conformant client should work. This page lists the tools the zot project documents or tests, and the caveats to know.
+
+## How to read this page
+
+- **Tested in CI:** the zot repository exercises the tool in its automated tests or workflows.
+- **Documented:** this documentation shows the tool working with zot, but the zot repository doesn't test it automatically.
+
+<Note>
+  "Tested in CI" means a test uses the tool. It doesn't promise support for every version. Where CI pins a version, the table shows it (taken from the zot `Makefile`). Treat it as a version known to work, not a minimum. If a tool has no version listed, the zot repository doesn't pin one.
+</Note>
+
+## Container clients and runtimes
+
+| Tool | Status | Notes |
+|---|---|---|
+| **Docker** | Tested in CI | Pushing and pulling Docker-format images needs `http.compat: ["docker2s2"]`. Docker needs HTTPS off `localhost` and stored credentials for protected repositories. See [Docker client](/clients/docker). |
+| **Podman** | Tested in CI | Builds and pulls work. Podman handles per-resource authentication challenges, so it's unaffected by the Docker mixed-access issue. See [Docker client](/clients/docker#mixed-anonymous-and-authenticated-access). |
+| **skopeo** | Tested in CI | The most widely used client in zot's tests. Use `--dest-tls-verify=false` against a plain-HTTP test registry. See [Push and pull images](/use/push-pull). |
+| **containerd** | Documented | Configure zot as a mirror with `hosts.toml` (v2.x) or inline mirror config (v1.x). The kind tutorial exercises containerd inside kind nodes. See [containerd](/clients/containerd). |
+| **cri-o** | Tested in CI | CI pulls images from zot through CRI-O with `crictl` (cri-tools v1.26.1 pinned). Works over the default `docker://` transport. |
+| **Kubernetes (kubelet)** | Documented | Reference images as `<zot-server>/image:tag` in a pod spec. CI also runs zot with kind (v0.31.0 pinned). See [Test deployments with kind](/guides/kind). |
+
+## Registry clients and OCI tools
+
+| Tool | Status | Notes |
+|---|---|---|
+| **regclient (`regctl`)** | Tested in CI (v0.10.0 pinned) | Pushes images and artifacts, and prints the reference tree. See [Software provenance workflow](/guides/provenance-workflow). |
+| **oras** | Tested in CI (v1.2.1 pinned) | Pushes and pulls OCI artifacts. See [Push and pull images](/use/push-pull). |
+| **crane** | Tested in CI | Used in zot's bearer-authentication tests against AWS Secrets Manager. CI installs the latest release. See [Push and pull images](/use/push-pull). |
+| **Helm** | Tested in CI (v3.9.1 pinned) | Pushes and pulls Helm charts as OCI artifacts. See [Push and pull images](/use/push-pull). |
+
+## Signing and scanning
+
+| Tool | Status | Notes |
+|---|---|---|
+| **cosign** | Tested in CI (v3.0.6 pinned) | Signing and verification, including the new bundle format with `--registry-referrers-mode=oci-1-1`, and legacy tag-based signatures. zot verifies the signatures. See [Verify image signatures](/security/signatures). |
+| **notation** | Tested in CI (v1.3.2 pinned) | Signing and verification, including signatures synced from another registry. See [Verify image signatures](/security/signatures). |
+| **Trivy** | Built in, tested in CI | zot embeds the Trivy library for [CVE scanning](/security/cve-scanning). You don't install Trivy separately. |
+
+## Tips
+
+<AccordionGroup>
+  <Accordion title="My client says the registry is insecure or uses HTTP">
+    Most clients require HTTPS for registries that aren't `localhost`. Enable TLS in zot ([HTTP and TLS](/configuration/http)). For a test registry, use the client's insecure option, such as `--dest-tls-verify=false` for skopeo or `regctl registry set --tls=disabled` for regctl.
+  </Accordion>
+  <Accordion title="A client can't push Docker-format images">
+    zot stores OCI images and rejects Docker schema 2 manifests unless compat mode is on. See [Docker image format compatibility](/clients/docker#docker-image-format-compatibility).
+  </Accordion>
+  <Accordion title="Authentication works with skopeo but not Docker">
+    This is the Docker mixed anonymous and authenticated access behavior. See [Docker client](/clients/docker#mixed-anonymous-and-authenticated-access).
+  </Accordion>
+</AccordionGroup>
+
+Using a tool that isn't listed? If it speaks the OCI Distribution Specification it should work. Report problems in the [zot repository](https://github.com/project-zot/zot/issues) or ask in the [CNCF Slack](https://cloud-native.slack.com/archives/C03EGRE4QGH).

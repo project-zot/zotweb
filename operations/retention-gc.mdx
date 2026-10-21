@@ -1,0 +1,346 @@
+---
+title: "Retention and garbage collection"
+description: "Keep storage under control with tag retention policies and inline garbage collection."
+icon: "broom"
+---
+
+zot reclaims storage in two cooperating steps:
+
+- **Retention policies** decide which tags and untagged manifests to remove. They're optional.
+- **Garbage collection (GC)** removes unreferenced blobs and applies the retention policies. It runs inline, so you don't need to take the registry offline.
+
+By default, with no retention policies, zot keeps every tag and deletes untagged manifests that nothing references. Retention runs as part of the GC task, so **retention needs `storage.gc` to be `true`**, which is the default.
+
+<Note>
+  This page covers retention. For the GC settings themselves (`gc`, `gcDelay`, `gcInterval`, `gcTimeWindow`) and how they're scheduled, see [Background tasks](/configuration/background-tasks#garbage-collection). For deduplication and storage backends, see [Storage overview](/configuration/storage/overview).
+</Note>
+
+## What a policy can do
+
+A retention policy applies to repositories that match a glob pattern. For tags, you can keep:
+
+- The top *n* most recently pushed tags
+- The top *n* most recently pulled tags
+- Tags pushed in the past *n* hours
+- Tags pulled in the past *n* hours
+- Tags that match a regular expression
+
+You configure retention under `storage.retention`. The `delay` and `dryRun` settings apply to the whole block, and `policies` is a list.
+
+## Configure retention
+
+This example has two policies. The first uses every attribute. The second is a default policy that keeps everything else.
+
+```json
+"storage": {
+  "retention": {
+    "dryRun": false,
+    "delay": "24h",
+    "policies": [
+      {
+        "repositories": ["infra/*", "tmp/**"],
+        "deleteReferrers": false,
+        "deleteUntagged": true,
+        "keepUntagged": {
+          "mostRecentlyPulledCount": 10,
+          "pulledWithin": "720h"
+        },
+        "keepTags": [{
+          "patterns": ["v2.*", ".*-prod"],
+          "mostRecentlyPushedCount": 10,
+          "mostRecentlyPulledCount": 10,
+          "pulledWithin": "720h",
+          "pushedWithin": "720h"
+        }]
+      },
+      {
+        "repositories": ["**"],
+        "keepTags": [{
+          "patterns": [".*"]
+        }]
+      }
+    ]
+  }
+}
+```
+
+### Retention settings
+
+<ParamField path="storage.retention.dryRun" type="boolean" default="false">
+  If `true`, zot logs each removal decision without removing anything.
+</ParamField>
+
+<ParamField path="storage.retention.delay" type="duration" default="storage.gcDelay">
+  Remove untagged manifests and referrers only if they're older than this. If you don't set it, zot uses `gcDelay`.
+</ParamField>
+
+<ParamField path="storage.retention.policies" type="array of object">
+  The list of policies. A repository uses the first policy whose `repositories` patterns match it.
+</ParamField>
+
+### Policy settings
+
+<ParamField path="repositories" type="array of string">
+  Glob patterns that select repositories. A single `*` matches one level, as in `infra/*`. A double `**` matches recursively, as in `tmp/**`. A policy without `repositories` matches no repository.
+</ParamField>
+
+<ParamField path="deleteReferrers" type="boolean" default="false">
+  If `true`, delete referrer manifests whose subject (the image they refer to) no longer exists. If `false`, keep them.
+</ParamField>
+
+<ParamField path="deleteUntagged" type="boolean" default="true">
+  If `true`, delete untagged manifests that are older than `delay`. This is the master switch for untagged cleanup. Manifests that an index or artifact references are never treated as untagged.
+</ParamField>
+
+<ParamField path="keepUntagged" type="object">
+  Keeps untagged manifests that meet at least one activity rule, even when `deleteUntagged` is `true`. It supports `mostRecentlyPushedCount`, `mostRecentlyPulledCount`, `pushedWithin`, and `pulledWithin`. It's useful for digest-only entries in a pull-through cache, which have no tag but are still pulled. Added in v2.1.19.
+</ParamField>
+
+<ParamField path="keepTags" type="array of object">
+  Criteria for tags to keep. Each entry has the settings below.
+</ParamField>
+
+### Settings in a `keepTags` entry
+
+<ParamField path="patterns" type="array of string">
+  Regular expressions that select tags. A tag matches if any pattern matches it. If you omit `patterns`, the entry applies to every tag.
+</ParamField>
+
+<ParamField path="mostRecentlyPushedCount" type="integer">
+  Keep the top *count* most recently pushed tags.
+</ParamField>
+
+<ParamField path="mostRecentlyPulledCount" type="integer">
+  Keep the top *count* most recently pulled tags.
+</ParamField>
+
+<ParamField path="pushedWithin" type="duration">
+  Keep tags pushed within this period, for example `168h`.
+</ParamField>
+
+<ParamField path="pulledWithin" type="duration">
+  Keep tags pulled within this period, for example `720h`.
+</ParamField>
+
+<Note>
+  Durations use Go syntax such as `24h` or `90m`. There's no `d` unit, so write seven days as `168h`.
+</Note>
+
+## How zot applies policies
+
+<AccordionGroup>
+  <Accordion title="Policies are evaluated per repository" defaultOpen>
+    - zot processes retention and GC for each repository on its own. The number of images kept in one repository doesn't affect another.
+    - A repository uses the **first** policy that matches it.
+    - If a repository matches no policy, zot keeps the repository and all of its tags.
+  </Accordion>
+  <Accordion title="Tags: which entry applies, and when a tag is kept" defaultOpen>
+    - If a policy has no `keepTags`, or `keepTags` is empty, all tags are kept.
+    - If a policy has at least one `keepTags` entry, **every tag that no entry selects is removed**.
+    - zot assigns each tag to the **first** `keepTags` entry whose `patterns` match it. Only that entry's rules apply to the tag. It doesn't fall through to later entries.
+    - Inside the chosen entry, the rules combine with **OR**. A tag is kept if it meets at least one of `mostRecentlyPushedCount`, `mostRecentlyPulledCount`, `pushedWithin`, or `pulledWithin`.
+    - If the entry has `patterns` and no other rules, every tag that matches a pattern is kept.
+    - So a kept tag satisfies: matches `patterns` AND (any rule).
+  </Accordion>
+  <Accordion title="Patterns are regular expressions">
+    Tag patterns are Go regular expressions that aren't anchored. `v2.*` also matches `rev2` and `my-v2`. Use `^v2\\..*$` in JSON to match only tags that start with `v2.`. An invalid pattern stops zot at startup.
+  </Accordion>
+  <Accordion title="Untagged manifests and referrers">
+    - Zot evaluates tagged and untagged manifests separately.
+    - `deleteUntagged` is the master switch. When it's `true`, `keepUntagged` protects untagged manifests that meet at least one of its rules.
+    - Rules that depend on pull or push times use zot's metadata (MetaDB) statistics. If those statistics aren't available, zot falls back to delay-based cleanup.
+    - `delay` protects new untagged manifests and referrers from removal. This matters while a client is still uploading the pieces of an image.
+  </Accordion>
+</AccordionGroup>
+
+<Warning>
+  If a policy has at least one `keepTags` entry, tags that no entry selects are removed. End your policy list with a catch-all policy, such as the one below, so that repositories without an explicit policy keep their tags.
+
+  ```json
+  {
+    "repositories": ["**"],
+    "keepTags": [{
+      "patterns": [".*"]
+    }]
+  }
+  ```
+
+  A policy without `repositories` matches no repository, so a catch-all policy needs `"repositories": ["**"]`.
+</Warning>
+
+## Complete example
+
+This configuration shows several policies in the context of a full file.
+
+```json
+{
+  "distSpecVersion": "1.1.1",
+  "storage": {
+    "rootDirectory": "/tmp/zot",
+    "gc": true,
+    "gcDelay": "2h",
+    "gcInterval": "1h",
+    "retention": {
+      "dryRun": false,
+      "delay": "24h",
+      "policies": [
+        {
+          "repositories": ["infra/*", "prod/*"],
+          "deleteReferrers": false,
+          "keepTags": [{
+            "patterns": ["v2.*", ".*-prod"]
+          },
+          {
+            "patterns": ["v3.*", ".*-prod"],
+            "pulledWithin": "168h"
+          }]
+        },
+        {
+          "repositories": ["tmp/**"],
+          "deleteReferrers": true,
+          "deleteUntagged": true,
+          "keepTags": [{
+            "patterns": ["v1.*"],
+            "pulledWithin": "168h",
+            "pushedWithin": "168h"
+          }]
+        },
+        {
+          "repositories": ["**"],
+          "deleteReferrers": true,
+          "deleteUntagged": true,
+          "keepTags": [{
+            "mostRecentlyPushedCount": 10,
+            "mostRecentlyPulledCount": 10,
+            "pulledWithin": "720h",
+            "pushedWithin": "720h"
+          }]
+        }
+      ]
+    },
+    "subPaths": {
+      "/a": {
+        "rootDirectory": "/tmp/zot1",
+        "dedupe": true,
+        "gc": true,
+        "retention": {
+          "policies": [
+            {
+              "repositories": ["a/infra/*", "a/prod/*"],
+              "deleteReferrers": false
+            }
+          ]
+        }
+      }
+    }
+  },
+  "http": {
+    "address": "127.0.0.1",
+    "port": "8080"
+  },
+  "log": {
+    "level": "debug"
+  }
+}
+```
+
+With this configuration:
+
+<Tabs>
+  <Tab title="infra/* and prod/*">
+    - Referrers of missing images are kept (`deleteReferrers` is `false`).
+    - Untagged manifests pushed more than 24 hours ago (`delay`) are deleted, because `deleteUntagged` defaults to `true`.
+    - Tags that match `v2.*` or `.*-prod` are kept. A `.*-prod` tag matches the first `keepTags` entry, so the second entry never applies to it.
+    - Tags that match `v3.*` are kept if pulled within `168h`.
+    - All other tags are deleted.
+  </Tab>
+  <Tab title="tmp/**">
+    - Referrers of missing images that were pushed more than 24 hours ago are deleted.
+    - Untagged manifests pushed more than 24 hours ago are deleted.
+    - Tags that match `v1.*` are kept if pulled or pushed within `168h`.
+    - All other tags are deleted.
+  </Tab>
+  <Tab title="Everything else (**)">
+    - Referrers of missing images and untagged manifests older than 24 hours are deleted.
+    - A tag is kept if it was pulled or pushed within `720h`, or is one of the 10 most recently pushed or pulled.
+    - All other tags are deleted.
+  </Tab>
+  <Tab title="a/infra/* and a/prod/*">
+    These repositories are in the `/a` subpath, which has its own retention configuration.
+
+    - Referrers of missing images are kept.
+    - Untagged manifests older than the subpath's `delay` are deleted. The subpath didn't set `delay`, so it uses the subpath's `gcDelay`, which defaults to `1h` when the subpath enables `gc`.
+  </Tab>
+</Tabs>
+
+<Warning>
+  A subpath doesn't inherit `gc` from the top-level `storage` settings. Set `"gc": true` in each subpath where you want garbage collection and retention to run. Also, `subPaths` is a separate storage feature with its own use cases. Don't use `subPaths` only to configure retention.
+</Warning>
+
+## Retention and sync
+
+If you [sync](/operations/mirroring) content into repositories that a retention policy covers, retention can delete images that sync is still bringing in. At startup, zot logs a warning when a sync `content` rule overlaps a retention policy. If the sync rule filters tags with `tags.regex`, make sure a `keepTags` pattern matches that same expression.
+
+## Test a retention policy
+
+Before you apply retention to production, preview its decisions with `zot verify-feature retention`. The command loads your configuration, runs the GC and retention tasks, and logs what it would keep and delete. It doesn't need a running zot server.
+
+```bash
+zot verify-feature retention /etc/zot/config.json
+```
+
+The command:
+
+1. Validates the configuration file and checks that `gc` is enabled.
+2. Turns on dry-run mode for all retention policies.
+3. Initializes storage and the metadata database.
+4. Runs GC and retention through the scheduler, and logs each decision for tags and untagged manifests.
+5. Keeps running until you stop it with `Ctrl+C` or `SIGTERM`, or until the `--timeout` expires.
+
+<Warning>
+  Only the retention decisions for tags, untagged manifests, and referrers are dry runs. **Garbage collection of orphaned blobs still runs and permanently deletes them.** For local storage, stop the zot server first to avoid database lock conflicts.
+</Warning>
+
+### Options
+
+| Option | Short | Description |
+|---|---|---|
+| `--log-file` | `-l` | Write logs to this file. The default is standard output. |
+| `--gc-interval` | `-i` | Override `gcInterval`, for every storage path including subpaths. |
+| `--timeout` | `-t` | Stop waiting for tasks after this period. The default is to wait until interrupted. |
+
+### Examples
+
+<CodeGroup>
+  ```bash Basic
+  zot verify-feature retention /etc/zot/config.json
+  ```
+
+  ```bash Log to a file
+  zot verify-feature retention -l /var/log/zot-retention-check.log /etc/zot/config.json
+  ```
+
+  ```bash Faster interval
+  zot verify-feature retention -i 30s /etc/zot/config.json
+  ```
+
+  ```bash With a timeout
+  zot verify-feature retention -l /var/log/zot-retention-check.log -i 1m -t 10m /etc/zot/config.json
+  ```
+</CodeGroup>
+
+### Read the logs
+
+Each decision is logged by the `retention` module with `decision` set to `keep` or `delete`, and a `reason` such as `retained by patterns policy` or `didn't meet any tag retention rule`. While `dryRun` is on, the log entry has `dry-run` set to `true`.
+
+When you enable an [audit log](/configuration/logging), zot also records deletions there.
+
+<Tip>
+  To trial a policy on a running registry, set `"dryRun": true` in the retention block. zot then only logs decisions until you set it back to `false`.
+</Tip>
+
+## Next steps
+
+- [Background tasks](/configuration/background-tasks) for GC scheduling and the time window
+- [Storage overview](/configuration/storage/overview) for deduplication and backends
+- [Mirroring and sync](/operations/mirroring)

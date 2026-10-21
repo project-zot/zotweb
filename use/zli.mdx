@@ -1,0 +1,323 @@
+---
+title: "zli command line"
+description: "Install zli and use it to list images, search, and look up CVEs on a zot registry."
+icon: "square-terminal"
+---
+
+`zli` is the command-line client for zot servers. It queries a registry's search extension to list repositories and images, find referrers, and look up vulnerabilities. For every command and flag, see the [zli command reference](/use/zli-reference).
+
+<Tip>
+  Install zli when you install zot. It needs a registry with the [`search` extension](/configuration/extensions#search) enabled. Many commands call its GraphQL endpoint.
+</Tip>
+
+## Get zli
+
+zli is released with zot. Download a binary or build it from source.
+
+### Supported platforms
+
+| OS | Architecture | Platform |
+|---|---|---|
+| `linux` | `amd64` | Intel-based Linux servers |
+| `linux` | `arm64` | ARM-based servers and Raspberry Pi 4 |
+| `darwin` | `amd64` | Intel-based macOS |
+| `darwin` | `arm64` | ARM-based macOS |
+
+<Tabs>
+  <Tab title="Download">
+    Go to the [releases page](https://github.com/project-zot/zot/releases) and download the binary for your platform from **Assets**. Binaries are named `zli-<os>-<architecture>`, for example `zli-darwin-amd64`.
+
+    ```bash
+    chmod +x zli-darwin-amd64
+    mv zli-darwin-amd64 /usr/local/bin/zli
+    ```
+  </Tab>
+  <Tab title="Build from source">
+    Clone the zot repository and run `make cli` with the same options you use to build zot:
+
+    ```bash
+    git clone https://github.com/project-zot/zot.git
+    cd zot
+    make OS=darwin ARCH=amd64 cli
+    ```
+
+    The binary is `bin/zli-darwin-amd64`.
+  </Tab>
+</Tabs>
+
+<Note>
+  The examples on this page use `zli` as the executable name. Rename the downloaded file to `zli` for convenience.
+</Note>
+
+Check the installation:
+
+```bash
+zli --version
+```
+
+## Connect to a registry
+
+zli stores named server profiles as JSON in `~/.zot`. Add a profile, then refer to it with `--config` on every command.
+
+<Steps>
+  <Step title="Add a server">
+    This adds a server with the name `remote-zot`:
+
+    ```bash
+    zli config add remote-zot https://server-example:8080
+    ```
+  </Step>
+  <Step title="List your servers">
+    ```bash
+    zli config list
+    ```
+  </Step>
+  <Step title="Use the server">
+    ```bash
+    zli image list --config remote-zot
+    ```
+  </Step>
+</Steps>
+
+You can skip a profile and pass `--url` instead, for one-off commands:
+
+```bash
+zli image list --url https://server-example:8080
+```
+
+### Authenticate
+
+For a registry that needs credentials, pass them in `username:password` form with `-u`:
+
+```bash
+zli image list --config remote-zot -u myUsername:myPassword
+```
+
+### Set a default server
+
+Set one profile as the default so you can omit `--config` and `--url`:
+
+```bash
+zli config set-default remote-zot
+zli image list
+```
+
+To clear the default:
+
+```bash
+zli config clear-default
+```
+
+If you pass `--config` or `--url`, that explicit value takes precedence over the default. With no default and neither flag, commands fail asking for a server.
+
+### Profile settings
+
+Each profile has these variables. Change them with `zli config set <name> <key> <value>`.
+
+| Variable | Description |
+|---|---|
+| `url` | zot server URL |
+| `showspinner` | Show a spinner while loading data (`true` or `false`) |
+| `verify-tls` | Verify the server's TLS certificate. Default `true`. |
+
+For a registry with a self-signed certificate, turn off verification for that profile:
+
+```bash
+zli config set remote-zot verify-tls false
+```
+
+<Warning>
+  Turning off TLS verification exposes you to man-in-the-middle attacks. Use it only for testing.
+</Warning>
+
+<Note>
+  The older forms `zli config -l`, `zli config <name> url`, and `zli config <name> <variable> <value>` are deprecated and will be removed. Use `list`, `show`, `get`, `set`, and `reset` instead.
+</Note>
+
+## Common tasks
+
+### List images
+
+List all images on a server:
+
+```bash
+zli image list --config local
+```
+
+```text
+REPOSITORY        TAG       OS/ARCH         DIGEST      SIGNED      SIZE
+alpine            latest    linux/amd64     3fc10231    false       84MB
+busybox           latest    linux/amd64     9172c5f6    false       2.2MB
+```
+
+Show one image by name and tag:
+
+```bash
+zli image name busybox:latest --config local
+```
+
+### List repositories
+
+```bash
+zli repo list --config local
+```
+
+```text
+REPOSITORY NAME
+alpine
+busybox
+```
+
+### Search for repositories and images
+
+`zli search query` does a fuzzy search.
+
+- To find a **repository**, give a partial name without a colon.
+- To find an **image**, give the full repository name followed by a colon and a tag or tag prefix.
+
+<CodeGroup>
+  ```bash Repositories containing "ng"
+  zli search query ng --config local
+  ```
+
+  ```bash Exact repository "nginx"
+  zli search query nginx: --config local
+  ```
+</CodeGroup>
+
+```text
+NAME            SIZE        LAST UPDATED                             DOWNLOADS   STARS
+nginx           794MB       2023-03-01 18:44:17.707690369 +0000 UTC  0           0
+mongo           232MB       2022-10-18 15:03:40.7646203 +0300 +0300  0           0
+golang          1.1GB       2023-06-22 00:32:38.613354854 +0000 UTC  0           0
+```
+
+An exact search returns every tag, with a line per platform for multi-architecture images:
+
+```text
+REPOSITORY  TAG          OS/ARCH         DIGEST      SIGNED      SIZE
+nginx       1.23.1       linux/amd64     d2ad9089    true        57MB
+nginx       latest       *               c724afdf    true        448MB
+                         linux/amd64     009c6fda    false       57MB
+                         linux/arm64/v8  ebb807a9    false       56MB
+```
+
+### Find referrers
+
+List everything that refers to an image, such as signatures and SBOMs, by tag or digest:
+
+```bash
+zli search subject "repo:tag" --config local
+zli search subject "repo@sha256:f9a0981..." --config local
+```
+
+### Look up vulnerabilities
+
+The `cve` commands need [CVE scanning](/security/cve-scanning) enabled on the server.
+
+<Tabs>
+  <Tab title="CVEs in an image">
+    ```bash
+    zli cve list c3/openjdk-dev:0.3.19 --config remote-zot
+    ```
+
+    ```text
+    ID                SEVERITY  TITLE
+    CVE-2015-8540     LOW       libpng: underflow read in png_check_keyword()
+    CVE-2017-16826    LOW       binutils: Invalid memory access in the coff_s...
+    ```
+
+    Filter to one CVE, get details, or choose a format:
+
+    ```bash
+    zli cve list c3/openjdk-dev:0.3.19 --config remote-zot --cve-id CVE-2015-8540
+    zli cve list c3/openjdk-dev:0.3.19 --config remote-zot --verbose
+    zli cve list c3/openjdk-dev:0.3.19 --config remote-zot -f json
+    ```
+
+    The detailed and JSON output can include the affected packages with their installed and fixed versions.
+  </Tab>
+  <Tab title="Images affected by a CVE">
+    ```bash
+    zli cve affected CVE-2017-9935 --config remote-zot
+    ```
+
+    ```text
+    IMAGE NAME        TAG               DIGEST    SIZE
+    c3/openjdk-dev    commit-5be4d92    ac3762e2  335MB
+    ```
+
+    Limit it to one repository:
+
+    ```bash
+    zli cve affected CVE-2017-9935 --config remote-zot --repo c3/openjdk-dev
+    ```
+  </Tab>
+  <Tab title="Where a CVE is fixed">
+    ```bash
+    zli cve fixed c3/openjdk-dev CVE-2017-9935 --config remote-zot
+    ```
+
+    ```text
+    IMAGE NAME        TAG                       DIGEST    SIZE
+    c3/openjdk-dev    commit-2674e8a-squashfs   b545b8ba  321MB
+    c3/openjdk-dev    commit-d5024ec-squashfs   cd45f8cf  321MB
+    ```
+  </Tab>
+  <Tab title="Compare two images">
+    List the CVEs that are in the first image but not in the second:
+
+    ```bash
+    zli cve diff c3/openjdk-dev:1.0.0 c3/openjdk-dev:2.0.0 --config remote-zot
+    ```
+
+    For multi-architecture images, add a platform after each image:
+
+    ```bash
+    zli cve diff myapp:v1.0 linux/amd64 myapp:v2.0 linux/arm64 --config remote-zot
+    ```
+  </Tab>
+</Tabs>
+
+### Check the server
+
+```bash
+zli status --config local
+```
+
+This prints information about the server's configuration and build.
+
+## Sort output
+
+Commands that can print long lists accept `--sort-by <option>`. The available options depend on the command.
+
+| Option | Sorts by |
+|---|---|
+| `alpha-asc` | Alphabetical, ascending |
+| `alpha-dsc` | Alphabetical, descending |
+| `relevance` | Quality of match |
+| `severity` | Severity of the condition |
+| `update-time` | Last update time |
+
+To see the options and the default for a command, add `--help`. For example, `zli image name --help` shows:
+
+```text
+--sort-by string   Options for sorting the output: [update-time, alpha-asc, alpha-dsc] (default "alpha-asc")
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="zli command reference" icon="list" href="/use/zli-reference">
+    Every command, subcommand, and flag.
+  </Card>
+  <Card title="CVE scanning" icon="bug" href="/security/cve-scanning">
+    Enable scanning so the cve commands return data.
+  </Card>
+  <Card title="Search with GraphQL" icon="magnifying-glass" href="/use/search-graphql">
+    The query language behind zli's search.
+  </Card>
+  <Card title="Push and pull images" icon="arrow-right-arrow-left" href="/use/push-pull">
+    Put images in the registry first.
+  </Card>
+</CardGroup>

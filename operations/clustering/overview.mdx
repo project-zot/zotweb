@@ -1,0 +1,53 @@
+---
+title: "Clustering overview"
+description: "Choose between high availability and scale-out when you need more than one zot instance."
+icon: "network-wired"
+---
+
+A single zot instance handles most workloads. When you need to survive failures, or when request rates and image counts outgrow one instance, you can run several. zot supports two different approaches, and they solve different problems.
+
+<CardGroup cols={2}>
+  <Card title="High availability" icon="heart-pulse" href="/operations/clustering/high-availability">
+    Two instances with **separate storage** that mirror each other with `sync`, behind a load balancer. A failure of either instance, or of its storage, doesn't stop the service.
+  </Card>
+  <Card title="Scale-out" icon="up-right-and-down-left-from-center" href="/operations/clustering/scale-out">
+    A cluster of instances that **split repositories between them**. Each repository is served by one instance. You add instances to handle more load.
+  </Card>
+</CardGroup>
+
+## Which one do you need?
+
+| | High availability | Scale-out |
+|---|---|---|
+| **Goal** | Keep serving if an instance or its storage fails | Spread load and data across many instances |
+| **How it works** | Each instance mirrors the other with the [`sync`](/operations/mirroring) extension | Each repository is assigned to one instance by hashing its name. Other instances proxy requests to it. |
+| **Storage** | Each instance has its own | Shared S3-compatible storage with a shared cache, or local storage on each instance |
+| **Number of instances** | Two | Two or more |
+| **If an instance fails** | The load balancer sends traffic to the other instance. A recent image may be missing if sync hadn't run yet. | Repositories assigned to that instance are unavailable until you resize the cluster |
+| **If storage fails** | The other instance keeps its own copy | With shared storage, the whole cluster is affected |
+| **Configuration** | `sync` on each instance, plus a load balancer | A `cluster` section on each instance, plus a load balancer or DNS |
+| **Replication delay** | Yes, up to the sync interval | None. Each repository has a single writer. |
+
+<Note>
+  The two approaches aren't alternatives for the same job. High availability gives you fault tolerance. Scale-out gives you capacity, and it isn't self-healing. A scale-out cluster with shared storage still depends on that storage, so it isn't highly available in the sense described here.
+</Note>
+
+## Common requirements
+
+Whichever approach you choose:
+
+- Put a load balancer, such as [HAProxy](https://www.haproxy.com/), or a DNS-based scheme in front of the instances.
+- Use health checks against `/readyz` (or `/livez`). See [Install on Linux](/install/linux#health-checks).
+- Keep the instance configurations aligned. Mismatched `cluster` settings or [sync](/operations/mirroring) settings cause confusing behavior.
+- Plan [backups](/operations/backup-restore) separately. Neither approach replaces them.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Set up high availability" icon="heart-pulse" href="/operations/clustering/high-availability">
+    Active/standby or active/active with sync.
+  </Card>
+  <Card title="Set up scale-out" icon="up-right-and-down-left-from-center" href="/operations/clustering/scale-out">
+    Cluster configuration, storage options, and load balancing.
+  </Card>
+</CardGroup>

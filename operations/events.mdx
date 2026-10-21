@@ -1,0 +1,182 @@
+---
+title: "Events"
+description: "Publish registry events as CloudEvents to HTTP webhooks or NATS."
+icon: "bell"
+---
+
+The `events` extension lets zot emit webhook-style notifications for important registry actions. It sends them to external systems such as automation pipelines, audit processors, message buses, and observability tools.
+
+zot publishes each event as a [CloudEvent](https://cloudevents.io/) to every sink you configure. Two sink types are supported: `http` and `nats`.
+
+<Note>
+  Events are part of the full zot image. The minimal image doesn't include them. See [Releases and images](/install/releases).
+</Note>
+
+## Enable events
+
+Add the `events` key under `extensions`:
+
+```json
+{
+  "distSpecVersion": "1.1.1",
+  "storage": {
+    "rootDirectory": "/var/lib/registry"
+  },
+  "http": {
+    "address": "127.0.0.1",
+    "port": "8080"
+  },
+  "log": {
+    "level": "info"
+  },
+  "extensions": {
+    "events": {
+      "enable": true,
+      "source": "https://registry.example.com",
+      "typePrefix": "com.example.registry",
+      "sinks": [
+        {
+          "type": "http",
+          "address": "https://events.example.com/zot",
+          "timeout": "1s",
+          "credentials": {
+            "username": "webhook-user",
+            "password": "<password>"
+          },
+          "headers": {
+            "X-Custom-Header": "my-value"
+          }
+        },
+        {
+          "type": "nats",
+          "address": "nats://127.0.0.1:4222",
+          "timeout": "10s",
+          "channel": "alerts"
+        }
+      ]
+    }
+  }
+}
+```
+
+zot reloads the events extension when you change the configuration file. You can turn events on or off, change the CloudEvents identity, and replace sinks without restarting. See [Configuration overview](/configuration/overview#reload-configuration-without-a-restart).
+
+## Event types
+
+| Event type | Emitted when | `data` fields |
+|---|---|---|
+| `zotregistry.repository.created` | A repository is created. | `name` |
+| `zotregistry.image.updated` | A manifest is pushed or updated. | `name`, `reference`, `digest`, `mediaType`, `manifest` |
+| `zotregistry.image.deleted` | A manifest is deleted. | `name`, `reference`, `digest`, `mediaType` |
+| `zotregistry.image.lint_failed` | An image fails the [lint](/configuration/extensions#lint) checks. | `name`, `reference`, `digest`, `mediaType`, `manifest` |
+| `zotregistry.image.scanned` | A [CVE scan](/security/cve-scanning) completes. | `name`, `reference`, `digest`, `mediaType`, `summary` |
+
+If you set `typePrefix`, it replaces the leading `zotregistry` namespace. See [CloudEvents identity](#cloudevents-identity).
+
+## Sink settings
+
+Set these on each entry in `sinks`.
+
+<ParamField path="type" type="string" required>
+  The sink type: `http` or `nats`.
+</ParamField>
+
+<ParamField path="address" type="string" required>
+  The sink endpoint. A URL for `http`, or a NATS server URL such as `nats://127.0.0.1:4222`.
+</ParamField>
+
+<ParamField path="timeout" type="duration">
+  How long zot waits for a delivery to complete, for example `5s`. For HTTP sinks, an omitted or non-positive value means `30s`.
+</ParamField>
+
+<ParamField path="channel" type="string">
+  The NATS subject that zot publishes events to. Used by `nats` sinks.
+</ParamField>
+
+<ParamField path="credentials" type="object">
+  Authentication for the sink. Fields: `username` and `password`, `token`, or `file` (a path to a credentials file).
+
+  For an HTTP sink, zot sends HTTP Basic authentication when `username` is set. Otherwise it sends a bearer `token` in the `Authorization` header. If you set both, the user name wins.
+</ParamField>
+
+<ParamField path="headers" type="object">
+  Extra headers to add to each HTTP delivery, as name and value pairs.
+</ParamField>
+
+<ParamField path="proxy" type="string">
+  A proxy to use when connecting to the sink.
+</ParamField>
+
+<ParamField path="caCertFile / certFile / keyFile" type="string">
+  TLS files for connecting to the sink: a CA certificate to verify the server, and a client certificate and key.
+</ParamField>
+
+<Warning>
+  Keep passwords and tokens out of the main configuration file where you can. Use `credentials.file` with strict file permissions, or a Kubernetes Secret.
+</Warning>
+
+## CloudEvents identity
+
+The optional `source` and `typePrefix` settings customize the identity of every CloudEvent zot emits:
+
+| Setting | Default | Description |
+|---|---|---|
+| `source` | `zotregistry.dev` | The CloudEvents `source` attribute. Set it so a receiver can tell deployments or tenants apart. |
+| `typePrefix` | `zotregistry` | The namespace for event types. With `com.example.registry`, the image-scanned event becomes `com.example.registry.image.scanned`. |
+
+`typePrefix` can't start or end with a dot, and it can't contain two consecutive dots. zot rejects the configuration otherwise.
+
+## Payload metadata
+
+When the event comes from an HTTP request, the payload also includes who did it and how:
+
+- `actor.name`: the user that triggered the event.
+- `request.addr`, `request.method`, and `request.useragent`: details of the HTTP request.
+
+```json
+{
+  "name": "space/my-image",
+  "reference": "latest",
+  "digest": "sha256:abc...",
+  "mediaType": "application/vnd.oci.image.manifest.v1+json",
+  "actor": {
+    "name": "john"
+  },
+  "request": {
+    "addr": "192.168.0.1:54321",
+    "method": "PUT",
+    "useragent": "docker/24.0.5"
+  }
+}
+```
+
+<Note>
+  For internal operations that have no incoming request, such as a scheduled scan, zot leaves out `actor` and `request`.
+</Note>
+
+## Image scanned events
+
+When CVE scanning and events are both enabled, each successful scan that wasn't served from the scan cache emits a `zotregistry.image.scanned` event. Scheduled and on-demand scans can both emit it. Re-reading a cached result doesn't emit a duplicate.
+
+The event data contains the repository name, the requested tag or digest, the resolved digest, the media type, and a vulnerability summary:
+
+```json
+{
+  "name": "space/my-image",
+  "reference": "latest",
+  "digest": "sha256:abc...",
+  "mediaType": "application/vnd.oci.image.manifest.v1+json",
+  "summary": {
+    "count": 4,
+    "fixableCount": 2,
+    "unknownCount": 0,
+    "lowCount": 1,
+    "mediumCount": 1,
+    "highCount": 2,
+    "criticalCount": 0,
+    "maxSeverity": "HIGH"
+  }
+}
+```
+
+For HTTP sinks, the CloudEvent `type` is also available in the `ce-type` header.

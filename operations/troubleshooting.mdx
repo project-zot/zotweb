@@ -1,0 +1,203 @@
+---
+title: "Troubleshooting"
+description: "Diagnose and fix common zot problems by symptom, and collect the diagnostics you need to get help."
+icon: "wrench"
+---
+
+Find your symptom below. Each entry gives the likely cause and the fix. If you don't find yours, collect [diagnostics](#collect-diagnostics) and ask in the [CNCF Slack](https://cloud-native.slack.com/archives/C03EGRE4QGH) or open an issue on [GitHub](https://github.com/project-zot/zot/issues).
+
+<Tip>
+  Start with `zot verify /etc/zot/config.json`. It checks the configuration file and catches most startup problems before you start the server.
+</Tip>
+
+## Startup and configuration
+
+<AccordionGroup>
+  <Accordion title="zot won't start, or it exits with a configuration error">
+    **Cause:** the configuration file is invalid, or a combination of settings isn't allowed.
+
+    **Fix:** validate the file and read the error in the log:
+
+    ```bash
+    zot verify /etc/zot/config.json
+    ```
+
+    Common causes:
+
+    - **`failed to enable ui, search extension must be enabled`**: the `ui` extension needs `search`. Enable `search`, or remove `ui`. See [Enable extensions](/configuration/extensions).
+    - **`failed to enable cve scanning due to incompatibility with remote storage, please disable cve`**: CVE scanning doesn't work with S3, GCS, or Azure storage, including a remote `subPaths` entry. Use local storage for the scanned images, or disable CVE scanning. See [CVE scanning](/security/cve-scanning).
+    - **An events `typePrefix` error**: the prefix can't start or end with a dot or contain `..`. See [Events](/operations/events#cloudevents-identity).
+    - **A `metrics` path error**: the path must be a clean absolute path, and can't be `/` or `/v2`. See [Monitoring](/operations/monitoring).
+  </Accordion>
+
+  <Accordion title="Under systemd, the service fails after the start timeout">
+    **Cause:** with `Type=notify`, systemd waits for zot to report ready. A first start can take longer than `TimeoutStartSec`, for example while zot downloads the CVE database, or rebuilds metadata by walking a large storage directory.
+
+    **Fix:** raise `TimeoutStartSec`, or use `Type=simple` for that start. A zot binary that's older than the readiness notification never sends `READY=1`, and fails the same way. Use `Type=simple` with those binaries. See [Install on Linux](/install/linux).
+  </Accordion>
+
+  <Accordion title="zot can't read or write its storage directory">
+    **Cause:** the user that runs zot doesn't own the storage and log directories, or a read-only mount.
+
+    **Fix:** check the zot log for the operating system error, such as `permission denied`, then fix ownership:
+
+    ```bash
+    sudo chown -R zot:zot /data/zot /var/log/zot
+    ```
+
+    For CVE scanning, zot also needs write access to the storage directory and enough space in `/tmp` for database downloads and layer unpacking.
+  </Accordion>
+
+  <Accordion title="My configuration change didn't take effect">
+    **Cause:** zot reloads some settings when the file changes, but not all. It doesn't reload on `SIGHUP`, which shuts zot down.
+
+    **Fix:** restart zot for settings that don't reload, such as `log`. See [Reload configuration without a restart](/configuration/overview#reload-configuration-without-a-restart).
+  </Accordion>
+
+  <Accordion title="An extension doesn't work, and the log says the binary doesn't include the feature">
+    **Cause:** you enabled an extension in a minimal binary or image. Extensions exist only in the full build. zot logs a warning that reads `skipping enabling <name> extension because given zot binary doesn't include this feature`.
+
+    **Fix:** run the full image or binary. The same message appears for profiling when the binary wasn't built with the `profile` label. See [Releases and images](/install/releases).
+  </Accordion>
+</AccordionGroup>
+
+## Authentication and access
+
+<AccordionGroup>
+  <Accordion title="401 Unauthorized">
+    **Cause:** zot requires authentication and the request has no valid credentials.
+
+    **Fix:** log in, or send credentials. Check that the user is in the `htpasswd` file, or in your LDAP or OpenID configuration, and that the password is right. After repeated failures, `failDelay` slows retries. See [Authentication](/security/authentication).
+  </Accordion>
+
+  <Accordion title="403 Forbidden, or an error saying the requested access is denied">
+    **Cause:** the user is authenticated, but [access control](/security/access-control) doesn't allow the action on that repository.
+
+    **Fix:** check the `accessControl` policies for the repository and the action (`read`, `create`, `update`, `delete`). The audit log shows the user and the request. Admin-only endpoints, such as profiling and trust-key upload, need a matching `accessControl.adminPolicy` when authentication is on, beginning with v2.1.22.
+  </Accordion>
+
+  <Accordion title="Docker: no basic auth credentials">
+    ```text
+    Error response from daemon: Head "https://myreg.example.com/v2/repo/image/manifests/tag": no basic auth credentials
+    ```
+
+    **Cause:** zot uses basic authentication with a mix of anonymous and authenticated policies. In that setup zot answers the Docker client's `/v2/` ping with `401`, and Docker has no stored credentials because you haven't run `docker login`.
+
+    **Fix:** run `docker login` once, for example with an API key, or use Podman or skopeo. See [Docker client](/clients/docker#mixed-anonymous-and-authenticated-access).
+  </Accordion>
+
+  <Accordion title="Docker: server gave HTTP response to HTTPS client">
+    ```text
+    http: server gave HTTP response to HTTPS client
+    ```
+
+    **Cause:** Docker requires HTTPS for any registry other than `localhost`, and zot is serving plain HTTP.
+
+    **Fix:** enable TLS in the `http` section. For local testing only, add the registry to `insecure-registries` in the Docker daemon configuration. See [Docker client](/clients/docker#https-and-tls) and [HTTP and TLS](/configuration/http).
+  </Accordion>
+
+  <Accordion title="429 Too Many Requests">
+    **Cause:** a rate limit applies, or a repository quota is reached. The rate limit is per client IP, so many clients behind one proxy share a limit. `storage.maxRepos` rejects pushes that would create a repository beyond the limit, and the response detail includes the limit.
+
+    **Fix:** raise or remove the limit, or spread clients across addresses. See [HTTP and TLS](/configuration/http) and [Storage overview](/configuration/storage/overview).
+  </Accordion>
+</AccordionGroup>
+
+## Pushing and pulling
+
+<AccordionGroup>
+  <Accordion title="Pushing a Docker-format image fails with MANIFEST_INVALID">
+    **Cause:** zot rejects manifests with a Docker media type, such as `application/vnd.docker.distribution.manifest.v2+json`, unless compatibility mode is on. The error detail includes the rejected `mediaType`.
+
+    **Fix:** set `http.compat` to `["docker2s2"]`, or push OCI-format images. See [Docker client](/clients/docker#docker-image-format-compatibility).
+  </Accordion>
+
+  <Accordion title="Push fails with 400 MANIFEST_INVALID on a tag">
+    **Cause:** beginning with v2.1.22, zot rejects tags that aren't valid under the Distribution Specification. Existing tags that don't conform stay readable and deletable.
+
+    **Fix:** use a valid tag. A tag may contain letters, digits, underscores, periods, and dashes, can't start with a period or dash, and is at most 128 characters. The `lint` extension can also fail a push with `MANIFEST_INVALID` when required annotations are missing. See [Enable extensions](/configuration/extensions#lint).
+  </Accordion>
+
+  <Accordion title="Push fails with MANIFEST_BLOB_UNKNOWN">
+    **Cause:** the manifest refers to a blob that zot doesn't have. The error includes the missing digest.
+
+    **Fix:** push all the layers and the config blob before the manifest. Most clients do this automatically. If it happens consistently, check whether a client failed partway through an earlier push.
+  </Accordion>
+
+  <Accordion title="Pulling from another repository's blob returns 404">
+    **Cause:** beginning with v2.1.21, blob `HEAD` and ranged `GET` requests are repository-local. A digest that exists only in another repository's dedupe cache returns `404`.
+
+    **Fix:** push or mount the blob into the repository you pull from. Set `storage.hydrateBlobOnRead` to `true` only if you need the old behavior. See [Upgrade zot](/install/upgrade).
+  </Accordion>
+
+  <Accordion title="Syncing or mirroring returns errors">
+    **Cause:** on-demand sync fails to reach the upstream registry. Beginning with v2.1.22, a hard upstream failure returns `503`, while a genuine miss on the upstream returns `404`. Syncing Docker schema 2 content also fails without `http.compat: ["docker2s2"]`.
+
+    **Fix:** check that zot can reach the upstream registry and has valid credentials, then check the sync settings. See [Mirroring and sync](/operations/mirroring).
+  </Accordion>
+</AccordionGroup>
+
+## Storage
+
+<AccordionGroup>
+  <Accordion title="503 Service Unavailable, or 500 Internal Server Error, on registry requests">
+    **Cause:** beginning with v2.1.22, zot reports storage backend failures instead of masking them as `404`, `400`, or `403`. A `503` means a transient failure, such as a temporary outage or throttling. A `500` means a permanent failure, such as a permission or configuration error.
+
+    **Fix:** retry a `503`. For a `500`, read the zot log and the backend's logs, then check credentials, bucket or container names, permissions, and quotas. See [Storage overview](/configuration/storage/overview#storage-failure-handling).
+  </Accordion>
+
+  <Accordion title="Garbage collection or other background tasks stop and retry">
+    **Cause:** GC, deduplication, scrub, and storage walks fail closed. If the backend can't give a complete view of storage, the task stops instead of acting on a partial result.
+
+    **Fix:** fix the underlying backend problem. The task retries on its next cycle. Watch `zot_gc_runs_total` and the scheduler metrics. See [Monitoring](/operations/monitoring).
+  </Accordion>
+
+  <Accordion title="The registry is slow to become ready after a restart">
+    **Cause:** zot enforces the `dedupe` setting at startup by walking storage. If MetaDB is missing, it also rebuilds repository metadata before it becomes ready. Large registries take longer.
+
+    **Fix:** wait for `/readyz`, and raise the systemd start timeout if needed. See [Backup and restore](/operations/backup-restore).
+  </Accordion>
+</AccordionGroup>
+
+## Collect diagnostics
+
+When you ask for help, include as many of these as you can:
+
+<Steps>
+  <Step title="Version and build">
+    ```bash
+    zot --version
+    ```
+
+    Note whether you run the full or the minimal binary or image.
+  </Step>
+  <Step title="Validated configuration, with secrets removed">
+    ```bash
+    zot verify /etc/zot/config.json
+    ```
+
+    Share the configuration with passwords, tokens, and keys removed.
+  </Step>
+  <Step title="Logs at a useful level">
+    Set `log.level` to `debug` and reproduce the problem. Restart zot after you change `log`. If the issue involves a change made through the API, add `log.audit`. See [Logging](/configuration/logging).
+  </Step>
+  <Step title="Health state">
+    ```bash
+    zot healthcheck --endpoint readyz /etc/zot/config.json
+    zot healthcheck --endpoint livez /etc/zot/config.json
+    zot healthcheck --endpoint startupz /etc/zot/config.json
+    ```
+
+    You can also request `/livez`, `/readyz`, and `/startupz` with `curl`. `/readyz` and `/startupz` fail until startup finishes. See [Monitoring](/operations/monitoring#health-endpoints).
+  </Step>
+  <Step title="Metrics and profiles">
+    For performance problems, collect [metrics](/operations/monitoring#metrics) and, if your binary includes profiling, a CPU or goroutine [profile](/operations/profiling).
+  </Step>
+  <Step title="The exact failing request">
+    The HTTP status code, the error body (zot returns JSON with an error code such as `MANIFEST_INVALID`), the client and its version, and the image reference.
+  </Step>
+</Steps>
+
+<Warning>
+  Remove passwords, API keys, tokens, and private keys from anything you share. Report security issues privately. See [Security posture](/security/posture).
+</Warning>
