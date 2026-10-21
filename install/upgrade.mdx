@@ -1,0 +1,88 @@
+---
+title: "Upgrade zot"
+description: "Upgrade an existing zot deployment safely, and check the release notes for changes that affect you."
+icon: "arrow-up"
+---
+
+Most zot upgrades replace the binary or image and restart. Because zot keeps image content in the standard OCI image layout, your images stay readable. The steps below reduce risk.
+
+## Before you upgrade
+
+<Steps>
+  <Step title="Read the release notes">
+    Read the [changelog](/changelog) for every release between your version and the target. Look for entries marked **Upgrade impact**, which describe behavior changes that can affect existing deployments.
+  </Step>
+  <Step title="Back up">
+    Back up your configuration file and the storage `rootDirectory`. If you use remote storage, follow your provider's backup process. See [Backup and restore](/operations/backup-restore).
+  </Step>
+  <Step title="Validate your configuration">
+    Run the new binary's validator against your existing config before you switch over:
+
+    ```bash
+    zot verify /etc/zot/config.json
+    ```
+  </Step>
+</Steps>
+
+## Upgrade
+
+<Tabs>
+  <Tab title="Linux service">
+    ```bash
+    sudo systemctl stop zot
+    sudo wget -O /usr/bin/zot https://github.com/project-zot/zot/releases/download/<tag>/zot-linux-amd64
+    sudo chmod +x /usr/bin/zot
+    sudo -u zot zot verify /etc/zot/config.json
+    sudo systemctl start zot
+    ```
+  </Tab>
+  <Tab title="Docker">
+    Pull the new tag and recreate the container with the same volume and configuration mounts:
+
+    ```bash
+    docker pull ghcr.io/project-zot/zot:<tag>
+    docker rm -f zot
+    docker run -d --name zot -p 5000:5000 \
+      -v $(pwd)/registry:/var/lib/registry \
+      -v $(pwd)/config.json:/etc/zot/config.json \
+      ghcr.io/project-zot/zot:<tag>
+    ```
+  </Tab>
+  <Tab title="Helm">
+    ```bash
+    helm repo update project-zot
+    helm upgrade zot project-zot/zot -f myfile.yaml
+    ```
+  </Tab>
+</Tabs>
+
+Pin an explicit version tag in production instead of `latest`, so upgrades happen when you choose.
+
+## After you upgrade
+
+- Check readiness with `zot healthcheck`, or `curl http://localhost:5000/v2/_catalog`.
+- Watch the logs for warnings about deprecated settings.
+- Pull and push a test image.
+
+## Behavior changes in v2.1.x
+
+These changes from recent releases affect existing deployments. See the [changelog](/changelog) for the full list.
+
+<AccordionGroup>
+  <Accordion title="v2.1.22: admin-only endpoints need an admin policy">
+    When authentication is enabled, the profiling and trust-key upload endpoints require an explicit matching `accessControl.adminPolicy`. Without one, authenticated users keep repository access but can't use these admin-only routes.
+  </Accordion>
+  <Accordion title="v2.1.22: sync preserves upstream digests">
+    The `preserveDigest` sync setting is deprecated and ignored. Syncing Docker schema 2 content needs `http.compat: ["docker2s2"]`.
+  </Accordion>
+  <Accordion title="v2.1.21: blob reads are repository-local by default">
+    Blob `HEAD` and ranged `GET` requests are repository-local. A digest that exists only in another repository's dedupe cache now returns `404` instead of being materialized into the requested repository. Set `storage.hydrateBlobOnRead` to `true` only if you need the previous behavior.
+  </Accordion>
+  <Accordion title="v2.1.22: signature payloads are no longer stored in MetaDB">
+    Existing BoltDB files don't shrink automatically. Avoid downgrading to a release that expects signature content in MetaDB.
+  </Accordion>
+</AccordionGroup>
+
+<Warning>
+  Don't downgrade without checking the release notes. Newer releases can change stored metadata in ways older releases don't expect.
+</Warning>

@@ -1,0 +1,268 @@
+---
+title: "Install on Linux"
+description: "Install zot as a systemd service on a bare-metal or virtual Linux server."
+icon: "linux"
+---
+
+This guide installs a zot binary on a Linux server and runs it as a systemd service under a dedicated non-root user.
+
+## Before you begin
+
+- Choose a binary for your platform: `zot-linux-amd64` or `zot-linux-arm64`, in a full or minimal flavor. See [Releases and images](/install/releases).
+- You need `sudo` access and `systemd`.
+- If you want local authentication, install the `htpasswd` utility (from `apache2-utils` or `httpd-tools`).
+
+## Install zot
+
+<Steps>
+  <Step title="Get the binary">
+    Download the binary to `/usr/bin/zot` and make it executable. This example downloads the latest full binary for an Intel-based server:
+
+    ```bash
+    sudo wget -O /usr/bin/zot https://github.com/project-zot/zot/releases/latest/download/zot-linux-amd64
+    sudo chmod +x /usr/bin/zot
+    sudo chown root:root /usr/bin/zot
+    ```
+
+    To pin a version, replace `latest/download` with `download/<tag>`, for example `download/v2.1.22`.
+  </Step>
+
+  <Step title="Create a user to own the service">
+    Create a non-root user with no home directory and no login, and create the data and log directories it owns:
+
+    ```bash
+    sudo adduser --no-create-home --disabled-password --gecos "" zot
+
+    sudo mkdir -p /data/zot /var/log/zot
+    sudo chown -R zot:zot /data/zot /var/log/zot
+    ```
+  </Step>
+
+  <Step title="Create a configuration file">
+    Create `/etc/zot/config.json`. Start from the [sample configuration](#sample-configuration-file) below, then keep it root-owned:
+
+    ```bash
+    sudo mkdir -p /etc/zot
+    sudo chown -R root:root /etc/zot
+    ```
+
+    See the [configuration overview](/configuration/overview) and [examples](/configuration/examples) for more options.
+  </Step>
+
+  <Step title="Add a local authentication account (optional)">
+    For local authentication, create `/etc/zot/htpasswd` with an initial user:
+
+    ```bash
+    htpasswd -bnB myUserName myPassword | sudo tee /etc/zot/htpasswd
+    ```
+
+    To add users, append with `tee -a`:
+
+    ```bash
+    htpasswd -bnB myUserName2 myPassword2 | sudo tee -a /etc/zot/htpasswd
+    ```
+  </Step>
+
+  <Step title="Define the systemd service">
+    Create `/etc/systemd/system/zot.service`:
+
+    <Tabs>
+      <Tab title="Type=notify (recommended)">
+        ```ini
+        [Unit]
+        Description=OCI Distribution Registry
+        Documentation=https://zotregistry.dev/
+        After=network.target auditd.service local-fs.target
+
+        [Service]
+        Type=notify
+        NotifyAccess=main
+        TimeoutStartSec=5min
+        ExecStart=/usr/bin/zot serve /etc/zot/config.json
+        Restart=on-failure
+        User=zot
+        Group=zot
+        LimitNOFILE=500000
+        MemoryHigh=30G
+        MemoryMax=32G
+
+        [Install]
+        WantedBy=multi-user.target
+        ```
+
+        With `Type=notify`, zot sends `READY=1` when startup finishes and `STOPPING=1` when shutdown begins. Dependent units start only after the registry is ready.
+
+        - Raise `TimeoutStartSec` if startup can take longer than five minutes, for example during a first-time CVE database download.
+        - This needs a zot build that sends readiness notifications. Older binaries never send `READY=1` and fail when the startup timeout expires.
+      </Tab>
+      <Tab title="Type=simple">
+        Use this for older binaries, or when systemd doesn't need to wait for readiness.
+
+        ```ini
+        [Unit]
+        Description=OCI Distribution Registry
+        Documentation=https://zotregistry.dev/
+        After=network.target auditd.service local-fs.target
+
+        [Service]
+        Type=simple
+        ExecStart=/usr/bin/zot serve /etc/zot/config.json
+        Restart=on-failure
+        User=zot
+        Group=zot
+        LimitNOFILE=500000
+        MemoryHigh=30G
+        MemoryMax=32G
+
+        [Install]
+        WantedBy=multi-user.target
+        ```
+      </Tab>
+    </Tabs>
+
+    <Warning>
+      Always run zot as a dedicated non-root `User` and `Group`, as in the `zot` user created in step 2.
+    </Warning>
+  </Step>
+
+  <Step title="Validate and start zot">
+    Check that the configuration is valid, then enable and start the service:
+
+    ```bash
+    sudo -u zot zot verify /etc/zot/config.json
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable zot
+    sudo systemctl start zot
+    sudo systemctl status zot
+    ```
+  </Step>
+</Steps>
+
+## Health checks
+
+Use `zot healthcheck` (alias `zot ready`) to probe the registry without `curl` or a shell. It also works in distroless containers. It reads the listener address from the same configuration file as `zot serve` and probes `/readyz` by default.
+
+```bash
+zot healthcheck /etc/zot/config.json
+zot healthcheck --endpoint livez /etc/zot/config.json
+zot healthcheck --url https://registry.example.com/startupz --timeout 5s
+```
+
+The supported endpoints are `livez`, `readyz`, and `startupz`. The command exits `0` for a `2xx` response and nonzero otherwise. Pass either a configuration file or `--url`, not both.
+
+## Systemd socket activation
+
+zot can inherit a listening socket from systemd instead of binding the configured address itself. This lets a non-root zot process listen on a privileged port without `CAP_NET_BIND_SERVICE`.
+
+<Steps>
+  <Step title="Create the socket unit">
+    Create `/etc/systemd/system/zot.socket`:
+
+    ```ini
+    [Unit]
+    Description=OCI Distribution Registry socket
+
+    [Socket]
+    ListenStream=443
+    NoDelay=true
+
+    [Install]
+    WantedBy=sockets.target
+    ```
+  </Step>
+  <Step title="Reference it from the service">
+    Add this line to the `[Service]` section of `zot.service`:
+
+    ```ini
+    Sockets=zot.socket
+    ```
+  </Step>
+  <Step title="Enable the socket">
+    Enable the socket instead of starting the service directly. systemd starts `zot.service` on the first connection.
+
+    ```bash
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now zot.socket
+    ```
+  </Step>
+</Steps>
+
+<Note>
+  The socket unit must pass exactly one stream socket. Its address and port take precedence over `http.address` and `http.port`. The rest of the HTTP configuration, including TLS, still applies. Socket activation isn't supported with multiple HTTP listeners.
+</Note>
+
+## Sample configuration file
+
+Use this as a template and adjust it for your environment.
+
+<Note>
+  The `updateInterval` in the CVE configuration is optional. It defaults to 2 hours, which is also the minimum. Before you enable CVE scanning, make sure zot can write to the storage directory and that `/tmp` has enough space for Trivy database downloads and layer unpacking.
+</Note>
+
+```json /etc/zot/config.json
+{
+  "distSpecVersion": "1.0.1",
+  "storage": {
+    "dedupe": true,
+    "gc": true,
+    "gcDelay": "1h",
+    "gcInterval": "6h",
+    "rootDirectory": "/data/zot/"
+  },
+  "http": {
+    "address": "0.0.0.0",
+    "port": "443",
+    "realm": "zot",
+    "tls": {
+      "cert": "/etc/letsencrypt/live/registry.example.com/fullchain.pem",
+      "key": "/etc/letsencrypt/live/registry.example.com/privkey.pem"
+    },
+    "auth": {
+      "htpasswd": {
+        "path": "/etc/zot/htpasswd"
+      },
+      "failDelay": 5
+    }
+  },
+  "log": {
+    "level": "debug",
+    "output": "/var/log/zot/zot.log",
+    "audit": "/var/log/zot/zot-audit.log"
+  },
+  "extensions": {
+    "search": {
+      "enable": true,
+      "cve": {
+        "updateInterval": "24h"
+      }
+    },
+    "sync": {
+      "enable": false,
+      "registries": [
+        {
+          "urls": ["https://mirror.gcr.io/library"],
+          "onDemand": true,
+          "maxRetries": 3,
+          "retryDelay": "5m",
+          "pollInterval": "6h"
+        },
+        {
+          "urls": ["https://index.docker.io"],
+          "onDemand": true
+        }
+      ]
+    },
+    "scrub": {
+      "interval": "24h"
+    }
+  }
+}
+```
+
+- **TLS:** use a certificate authority such as [Let's Encrypt](https://letsencrypt.org/). See [HTTP and TLS](/configuration/http).
+- **Sync:** the sample defines two upstream registries but sets `"enable": false`. Set it to `true` to turn on [mirroring](/operations/mirroring).
+
+## After the installation
+
+If your registry is public-facing, test your TLS configuration with a service such as the [Qualys SSL Server Test](https://www.ssllabs.com/ssltest/). Then work through the [production checklist](/operations/production-checklist).

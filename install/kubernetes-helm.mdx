@@ -1,0 +1,202 @@
+---
+title: "Install on Kubernetes with Helm"
+description: "Deploy zot to a Kubernetes cluster using the zot Helm chart."
+icon: "dharmachakra"
+---
+
+Use the zot Helm chart to deploy zot as an application in a Kubernetes cluster.
+
+## Before you begin
+
+- `kubectl` installed and a running Kubernetes cluster.
+- [Helm](https://helm.sh/) installed.
+- Linux nodes with Intel (`amd64`) or ARM (`arm64`) processors.
+
+See [Releases and images](/install/releases) for the available images.
+
+## Install zot
+
+<Steps>
+  <Step title="Add the chart repository">
+    Add the repository that hosts the zot charts and give it a local name:
+
+    ```bash
+    helm repo add project-zot https://zotregistry.dev/helm-charts
+    ```
+
+    The charts are also published on [Artifact Hub](https://artifacthub.io/packages/search?org=project-zot).
+
+    Confirm the chart is available:
+
+    ```bash
+    helm repo update project-zot
+    helm search repo project-zot
+    ```
+
+    ```text
+    NAME             CHART VERSION  APP VERSION  DESCRIPTION
+    project-zot/zot  <chart-version>  <zot-version>  A Helm chart for Kubernetes
+    ```
+
+    `APP VERSION` is the version of the zot image the chart deploys.
+  </Step>
+
+  <Step title="Review the chart values">
+    ```bash
+    helm show values project-zot/zot
+    ```
+
+    The defaults are often fine:
+
+    ```yaml
+    replicaCount: 1
+    image:
+      repository: ghcr.io/project-zot/zot
+      pullPolicy: IfNotPresent
+      tag: "<zot-version>"
+    serviceAccount:
+      create: true
+      annotations: {}
+      name: ""
+    service:
+      type: NodePort
+      port: 5000
+    ```
+
+    These settings are configurable:
+
+    <ParamField path="replicaCount" type="integer" default="1">
+      Number of replicas of the application.
+    </ParamField>
+    <ParamField path="image.repository" type="string" default="ghcr.io/project-zot/zot">
+      Repository and image name. Use `ghcr.io/project-zot/zot-minimal` for the minimal image.
+    </ParamField>
+    <ParamField path="image.pullPolicy" type="string" default="IfNotPresent">
+      When to pull the image. If unset, it's `Always` for the `latest` tag or no tag, and `IfNotPresent` for any other tag.
+    </ParamField>
+    <ParamField path="image.tag" type="string">
+      Image version. Defaults to the chart `appVersion`. For example, `latest` or a release tag.
+    </ParamField>
+    <ParamField path="serviceAccount.create" type="boolean">
+      Whether to create a service account.
+    </ParamField>
+    <ParamField path="serviceAccount.annotations" type="object">
+      Annotations for the service account.
+    </ParamField>
+    <ParamField path="serviceAccount.name" type="string">
+      Service account name. If unset and `create` is true, a name is generated from the fullname template.
+    </ParamField>
+    <ParamField path="service.type" type="string">
+      `ClusterIP`, `NodePort`, `LoadBalancer`, `ExternalName`, or Headless.
+    </ParamField>
+    <ParamField path="service.port" type="integer" default="5000">
+      Port number of the service.
+    </ParamField>
+    <ParamField path="strategy.type" type="string">
+      Kubernetes [deployment strategy](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#strategy).
+    </ParamField>
+  </Step>
+
+  <Step title="Install the chart">
+    <Tabs>
+      <Tab title="Defaults">
+        ```bash
+        helm install zot project-zot/zot
+        ```
+      </Tab>
+      <Tab title="--set">
+        Override one or more values:
+
+        ```bash
+        helm install zot project-zot/zot --set replicaCount=2,service.port=5050
+        ```
+
+        To use the minimal image:
+
+        ```bash
+        helm install zot project-zot/zot --set image.repository=ghcr.io/project-zot/zot-minimal
+        ```
+      </Tab>
+      <Tab title="Values file">
+        Create `myfile.yaml`:
+
+        ```yaml
+        replicaCount: 2
+        service:
+          port: 5050
+        ```
+
+        ```bash
+        helm install zot project-zot/zot -f myfile.yaml
+        ```
+      </Tab>
+      <Tab title="Pinned version">
+        ```bash
+        helm install zot project-zot/zot --version <chart-version>
+        ```
+
+        Add `--kubeconfig $HOME/.kube/config` to target a specific cluster.
+      </Tab>
+    </Tabs>
+
+    The images are multi-architecture, so you usually don't need to change the repository for your CPU type.
+  </Step>
+</Steps>
+
+## Verify the installation
+
+<Steps>
+  <Step title="Check the release">
+    ```bash
+    helm list
+    ```
+
+    The `STATUS` column shows `deployed` when the install succeeded.
+  </Step>
+  <Step title="Query the registry">
+    After the pods are running, with the default `NodePort` service:
+
+    ```bash
+    export NODE_PORT=$(kubectl get --namespace default -o jsonpath="{.spec.ports[0].nodePort}" services zot)
+    export NODE_IP=$(kubectl get nodes --namespace default -o jsonpath="{.items[0].status.addresses[0].address}")
+    curl http://$NODE_IP:$NODE_PORT/v2/_catalog
+    ```
+
+    A new registry returns an empty list:
+
+    ```json
+    {"repositories":[]}
+    ```
+  </Step>
+</Steps>
+
+## Edit the zot configuration
+
+The chart installs a minimal configuration at `/etc/zot/config.json`:
+
+```json
+{
+  "storage": {
+    "rootDirectory": "/var/lib/registry"
+  },
+  "http": {
+    "address": "0.0.0.0",
+    "port": "5000"
+  },
+  "log": {
+    "level": "debug"
+  }
+}
+```
+
+See the [configuration overview](/configuration/overview) to enable authentication, storage backends, extensions, and clustering.
+
+## Uninstall
+
+```bash
+helm uninstall zot
+```
+
+<Info>
+  For the full set of chart options, see the [Helm documentation](https://helm.sh/docs/).
+</Info>

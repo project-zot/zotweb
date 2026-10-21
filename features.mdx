@@ -1,0 +1,67 @@
+---
+title: "Features"
+description: "Everything zot does, grouped by what you want to achieve."
+icon: "sparkles"
+---
+
+zot ships as a single binary. Behavior is controlled by a configuration file, and features outside the core Distribution Specification are [extensions](/concepts/extensions) that you enable when you need them.
+
+## Standards and compatibility
+
+- Conforms to the [OCI Distribution Specification](https://github.com/opencontainers/distribution-spec) APIs.
+- Uses the [OCI image layout](https://github.com/opencontainers/image-spec/blob/master/image-layout.md) for storage. zot can serve any OCI image layout as a registry.
+- Keeps core Distribution Specification APIs separate from zot-specific extensions.
+- Supports [Helm charts](https://helm.sh/docs/topics/registries/) and other OCI artifacts.
+- Works with ecosystem tools such as [skopeo](https://github.com/containers/skopeo) and [cri-o](https://kubernetes.io/docs/setup/production-environment/container-runtimes/#cri-o). See [Client compatibility](/clients/compatibility).
+- Released for multiple operating systems and architectures. See [Releases and images](/install/releases).
+
+## Security
+
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="key" href="/security/authentication">
+    TLS mutual authentication, HTTP Basic (htpasswd and LDAP), bearer tokens, OpenID Connect, and API keys.
+  </Card>
+  <Card title="Access control" icon="user-lock" href="/security/access-control">
+    Identity-based access control per repository, with live reload of authorization changes.
+  </Card>
+  <Card title="Signatures" icon="signature" href="/security/signatures">
+    Verify container image signatures from cosign and notation.
+  </Card>
+  <Card title="CVE scanning" icon="bug" href="/security/cve-scanning">
+    Built-in vulnerability scanning of images.
+  </Card>
+</CardGroup>
+
+Also: TLS support, [immutable tags](/security/immutable-tags), rate limiting including per HTTP method, and a [hardened build](/security/posture) that runs without root privileges.
+
+## Storage
+
+- Inline storage optimizations: automatic garbage collection of orphaned blobs, layer deduplication using hard links, and data scrubbing. See [Retention and garbage collection](/operations/retention-gc).
+- [Local, S3, GCS, and Azure storage](/configuration/storage/overview).
+- Multiple storage paths and backends served by one zot server.
+- Delete images by tag.
+
+## Search and tools
+
+- Advanced image queries with the [search extension](/use/search-graphql).
+- A [web UI](/use/web-ui) for browsing images and copying pull commands.
+- [`zli`](/use/zli), a command-line client.
+- [`zb`](/operations/benchmarking-zb), a benchmarking tool for any Distribution Specification registry.
+- Swagger-based API documentation. See the [API reference](/api-reference/introduction).
+
+## Operations
+
+- [Mirroring and sync](/operations/mirroring): pull from and synchronize with other conformant registries.
+- [Clustering](/operations/clustering/overview): high availability and scale-out.
+- [Prometheus metrics](/operations/monitoring), with a node exporter for the minimal build.
+- [Events](/operations/events) to webhooks and NATS.
+- [Tag retention policies](/operations/retention-gc).
+- Behavior controlled by a [single configuration file](/configuration/overview).
+
+## License
+
+Released under the [Apache 2.0 License](https://github.com/project-zot/zot/blob/main/LICENSE).
+
+<Note>
+  zot is currently best suited to on-premises deployments, for example colocated with Kubernetes. You can also run it in the cloud with S3, GCS, or Azure storage.
+</Note>

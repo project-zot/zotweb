@@ -1,0 +1,73 @@
+---
+title: "Architecture"
+description: "zot's design goals, components, and the choices behind them."
+icon: "sitemap"
+---
+
+zot is an OCI-native container image registry. This page covers its design goals, overall structure, and the main components.
+
+## Design goals
+
+<AccordionGroup>
+  <Accordion title="OCI-first" defaultOpen>
+    - **HTTP APIs strictly conform to the [OCI Distribution Specification](https://github.com/opencontainers/distribution-spec).** zot aims to be a production reference implementation of the specification. It doesn't support any other vendor protocol.
+    - **Storage follows the [OCI Image Specification](https://github.com/opencontainers/image-spec).** The only supported layout is the OCI image layout. As a result, zot can serve any existing OCI image layout, and it converts data on the wire into that layout.
+  </Accordion>
+  <Accordion title="Single binary" defaultOpen>
+    zot is one binary with all features included, so deployment is simple on bare metal, cloud, and embedded devices. A single configuration file controls its behavior.
+  </Accordion>
+  <Accordion title="Enable only what you need" defaultOpen>
+    The core OCI-compliant HTTP APIs and storage are separate from add-on features modeled as [extensions](/concepts/extensions). You can select extensions at build time and at run time. See [Security posture](/security/posture) for conditional builds.
+  </Accordion>
+</AccordionGroup>
+
+## Overall architecture
+
+zot is organized as: **zot-full = zot-minimal + extensions**.
+
+<Frame caption="The minimal build is the core registry. The full build adds extensions.">
+  <img src="/images/zot-architecture.jpg" alt="Architecture diagram: clients reach HTTP APIs, which sit above configuration and authentication, container image data storage, metadata storage, a task scheduler, and extensions" style={{ maxWidth: "460px" }} />
+</Frame>
+
+- The **minimal build** is the core registry described by the OCI Distribution Specification.
+- The **full build** adds features outside the specification that the specification allows as [extensions](https://github.com/opencontainers/distribution-spec/tree/main/extensions).
+
+## Components
+
+### External interaction
+
+Clients and administrators interact with zot in two ways:
+
+- **Client-initiated queries** for data and metadata, over HTTP APIs. Core data path queries follow the OCI Distribution Specification.
+- **Admin-initiated configuration**.
+
+What happens to metadata queries depends on the `search` extension:
+
+- **Enabled:** zot maintains a database and answers complex queries efficiently through GraphQL. See [Search with GraphQL](/use/search-graphql).
+- **Disabled:** basic queries use the core APIs. They search storage directly, so they're less efficient and more limited.
+
+### Configuration
+
+One configuration file governs a zot instance. It has sections for `http`, `storage`, `log`, and `extensions`.
+
+For sensitive credentials, you can store values in separate files that the main file references. Separate files let you apply stricter permissions, and they work with [Kubernetes Secrets](https://kubernetes.io/docs/concepts/configuration/secret/). See the [configuration overview](/configuration/overview).
+
+### Authentication and authorization
+
+zot supports a full set of authentication and authorization options natively. They're enforced before any request reaches the storage layer. See [Authentication](/security/authentication).
+
+### Storage drivers
+
+zot supports any modern local filesystem and AWS S3 or S3-compatible storage. It also supports GCS and Azure Blob Storage. See [Storage overview](/configuration/storage/overview).
+
+<Note>
+  Deduplication works on local and remote filesystems, but it needs a filesystem with hard-link support.
+</Note>
+
+### Security scanning
+
+zot integrates with the [trivy](https://github.com/aquasecurity/trivy) scanner to find vulnerabilities in images. It refreshes the vulnerability database periodically at a configurable interval. The scanner implementation is hidden from you and may change over time. See [CVE scanning](/security/cve-scanning).
+
+### Background tasks
+
+A task scheduler runs periodic work such as garbage collection, sync, and scrubbing. It's designed not to degrade or interrupt foreground HTTP requests. See [Background tasks](/configuration/background-tasks).
