@@ -1,0 +1,239 @@
+---
+title: "API overview"
+description: "The zot REST API: endpoints, when each is available, how to authenticate, and examples."
+icon: "book"
+---
+
+zot implements the [OCI Distribution Specification endpoints](https://github.com/opencontainers/distribution-spec/blob/main/spec.md#endpoints) and adds endpoints for authentication and extensions. The API uses the same address and port as the web UI and as image tools such as skopeo and docker.
+
+The examples on this page assume a registry at `localhost:5000`.
+
+<CardGroup cols={3}>
+  <Card title="Endpoint reference" icon="code" href="/api-reference/registry/check-api-support">
+    Every OCI and zot endpoint in the OpenAPI spec, with an interactive playground.
+  </Card>
+  <Card title="Search API" icon="magnifying-glass" href="/api-reference/search">
+    The GraphQL endpoint for image, tag, and vulnerability queries.
+  </Card>
+  <Card title="Extension endpoints" icon="puzzle-piece" href="/api-reference/extensions">
+    Login, token, profiling, metrics, and health endpoints.
+  </Card>
+</CardGroup>
+
+## Endpoints at a glance
+
+<Note>
+  Some endpoints exist only when an extension is enabled in the [configuration](/configuration/extensions), when the binary was built with the matching build label, or both. Full binaries and images from the [releases](/install/releases) include every extension label except `debug`. Minimal builds include none.
+</Note>
+
+### OCI Distribution endpoints
+
+Always available. Full details are in the [endpoint reference](/api-reference/registry/check-api-support).
+
+| Endpoint | Methods | Purpose |
+|---|---|---|
+| `/v2/` | `GET` | Check API support and discover how to authenticate |
+| `/v2/_catalog` | `GET` | List repositories |
+| `/v2/_oci/ext/discover` | `GET` | List the extension endpoints enabled on this registry |
+| `/v2/{name}/tags/list` | `GET` | List tags in a repository |
+| `/v2/{name}/manifests/{reference}` | `GET`, `HEAD`, `PUT`, `DELETE` | Pull, check, push, and delete manifests |
+| `/v2/{name}/blobs/{digest}` | `GET`, `HEAD`, `DELETE` | Pull, check, and delete blobs |
+| `/v2/{name}/blobs/uploads/` | `POST` | Start a blob upload, or mount a blob |
+| `/v2/{name}/blobs/uploads/{session_id}` | `GET`, `PATCH`, `PUT`, `DELETE` | Continue, complete, or cancel an upload |
+| `/v2/{name}/referrers/{digest}` | `GET` | List artifacts that refer to a digest |
+
+<Warning>
+  The upload start endpoint needs the trailing slash: `/v2/{name}/blobs/uploads/`. Without it, the request doesn't match a route.
+</Warning>
+
+### zot extension endpoints
+
+| Endpoint | Methods | Available when |
+|---|---|---|
+| `/v2/_zot/ext/search` | `GET`, `POST` | The `search` extension is enabled. See [Search API](/api-reference/search). |
+| `/v2/_zot/ext/mgmt` | `GET` | The `search` extension is enabled |
+| `/v2/_zot/ext/userprefs` | `PUT` | Both `search` and `ui` are enabled |
+| `/v2/_zot/ext/notation` | `POST` | The `trust` extension is enabled with `notation` |
+| `/v2/_zot/ext/cosign` | `POST` | The `trust` extension is enabled with `cosign` |
+| `/v2/_zot/pprof/` | `GET` | The binary was built with the `profile` label, which full builds include. It has no configuration key. |
+
+### zot authentication endpoints
+
+| Endpoint | Methods | Available when |
+|---|---|---|
+| `/zot/auth/apikey` | `GET`, `POST`, `DELETE` | `http.auth.apikey` is `true`. OpenID configurations enable it automatically. |
+| `/zot/auth/logout` | `POST` | Any basic authentication is enabled: htpasswd, LDAP, OpenID, or API keys |
+| `/zot/auth/login` | `GET` | OpenID or OAuth2 authentication is enabled |
+| `/zot/auth/callback/{provider}` | `GET` | OpenID or OAuth2 authentication is enabled |
+| `/zot/auth/token` | `GET`, `POST` | Bearer token exchange is configured |
+
+### Other endpoints
+
+| Endpoint | Methods | Available when |
+|---|---|---|
+| `/livez`, `/readyz`, `/startupz` | `GET` | Always. See [Health checks](/install/linux#health-checks). |
+| `/metrics` (path is configurable) | `GET` | The `metrics` extension is enabled. See [Monitoring](/operations/monitoring). |
+| `/swagger/v2/` | Browser | Only in `debug` builds |
+| `/v2/_zot/debug/graphql-playground` | Browser | Only in `debug` builds |
+
+The [extension endpoints](/api-reference/extensions) page covers the endpoints that aren't in the OpenAPI spec.
+
+## Authentication
+
+If you haven't configured [authentication](/security/authentication), anyone can call the API. Otherwise, authenticate with one of these:
+
+<Tabs>
+  <Tab title="Password">
+    Use HTTP Basic with your htpasswd or LDAP credentials:
+
+    ```bash
+    curl -u <user>:<password> http://localhost:5000/v2/_catalog
+    ```
+  </Tab>
+  <Tab title="API key">
+    Use your username and an [API key](/security/api-keys) as the password. This is the right choice for scripts when you normally sign in with OpenID.
+
+    ```bash
+    curl -u <user>:zak_<key> http://localhost:5000/v2/_catalog
+    ```
+  </Tab>
+  <Tab title="Bearer token">
+    Send a token from your token service, or from zot's [token endpoint](/api-reference/extensions#token-endpoint):
+
+    ```bash
+    curl -H "Authorization: Bearer <token>" http://localhost:5000/v2/_catalog
+    ```
+  </Tab>
+  <Tab title="Client certificate">
+    With [mutual TLS](/security/mtls), present a client certificate:
+
+    ```bash
+    curl --cert client.crt --key client.key --cacert ca.crt https://registry.example.com/v2/_catalog
+    ```
+  </Tab>
+</Tabs>
+
+Anonymous requests that need credentials get `401` with a `WWW-Authenticate` header. A signed-in user without permission gets `403`.
+
+### Create and use an API key
+
+You can create an API key only after signing in with another method, for example with a password or in the web UI. The key is returned once, so store it right away.
+
+<Steps>
+  <Step title="Create a key">
+    ```bash
+    curl -u <user>:<password> -X POST http://localhost:5000/zot/auth/apikey \
+      -d '{"label": "ci", "scopes": ["repo1", "repo2"], "expirationDate": "2026-12-31T00:00:00Z"}'
+    ```
+
+    `scopes` and `expirationDate` are optional. `expirationDate` uses RFC 3339 format.
+
+    ```json
+    {
+      "createdAt": "2026-10-20T09:15:00.1234567Z",
+      "expirationDate": "2026-12-31T00:00:00Z",
+      "isExpired": false,
+      "creatorUa": "curl/8.4.0",
+      "generatedBy": "manual",
+      "lastUsed": "0001-01-01T00:00:00Z",
+      "label": "ci",
+      "scopes": ["repo1", "repo2"],
+      "uuid": "c931e635-a80d-4b52-b035-6b57be5f6e74",
+      "apiKey": "zak_<key>"
+    }
+    ```
+  </Step>
+  <Step title="Use the key as the password">
+    ```bash
+    curl -u <user>:zak_<key> http://localhost:5000/v2/_catalog
+    ```
+  </Step>
+  <Step title="List and revoke keys">
+    The list shows key details but never the key itself. Revoke a key by its `uuid`.
+
+    ```bash
+    curl -u <user>:<password> http://localhost:5000/zot/auth/apikey
+    curl -u <user>:<password> -X DELETE "http://localhost:5000/zot/auth/apikey?id=<uuid>"
+    ```
+  </Step>
+</Steps>
+
+## Examples
+
+### List repositories
+
+```bash
+curl http://localhost:5000/v2/_catalog
+```
+
+```json
+{
+  "repositories": ["alpine", "busybox"]
+}
+```
+
+For large registries, paginate with `n` and `last`. When more results exist, the response has a `Link` header with `rel="next"`.
+
+```bash
+curl "http://localhost:5000/v2/_catalog?n=100&last=busybox"
+```
+
+### List tags
+
+```bash
+curl http://localhost:5000/v2/busybox/tags/list
+```
+
+### Discover enabled extensions
+
+```bash
+curl http://localhost:5000/v2/_oci/ext/discover
+```
+
+```json
+{
+  "extensions": [
+    {
+      "name": "_zot",
+      "url": "https://github.com/project-zot/zot/blob/<release-tag>/pkg/extensions/_zot.md",
+      "description": "zot registry extensions",
+      "endpoints": [
+        "/v2/_zot/ext/search",
+        "/v2/_zot/ext/userprefs",
+        "/v2/_zot/ext/mgmt"
+      ]
+    }
+  ]
+}
+```
+
+The `endpoints` list reflects which extensions are enabled on your registry.
+
+### Pull a manifest
+
+```bash
+curl -H "Accept: application/vnd.oci.image.manifest.v1+json" \
+  http://localhost:5000/v2/busybox/manifests/latest
+```
+
+The response includes a `Docker-Content-Digest` header with the manifest digest.
+
+### Upload a certificate for notation
+
+This endpoint is [admin-only](/api-reference/extensions#trust-store-uploads) when authentication is on.
+
+```bash
+curl -u <admin>:<password> --data-binary @certificate.crt \
+  -X POST "http://localhost:5000/v2/_zot/ext/notation?truststoreType=ca"
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Search with GraphQL" icon="magnifying-glass" href="/use/search-graphql">
+    Query images, tags, and vulnerabilities.
+  </Card>
+  <Card title="Push and pull" icon="arrow-right-arrow-left" href="/use/push-pull">
+    Use skopeo, regclient, oras, and helm instead of raw HTTP.
+  </Card>
+</CardGroup>
