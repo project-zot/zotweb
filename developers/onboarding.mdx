@@ -1,0 +1,141 @@
+---
+title: "Onboard for development"
+description: "Set up a development environment, build and run zot, and learn the code layout."
+icon: "laptop-code"
+---
+
+zot is a production-ready, open-source, extensible OCI-native image registry, written in Go. This page gets you from a clone to a running development build.
+
+## Prerequisites
+
+- **Platform:** Linux or macOS, on Intel (`amd64`) or ARM (`arm64`). Development should work on any platform with the Go toolchain.
+- **Go:** install the toolchain from [go.dev](https://go.dev/learn/). The version must be at least the one in the `go` line of `go.mod`, or the build fails.
+- **make** and **git**.
+
+## Get the code
+
+Fork [project-zot/zot](https://github.com/project-zot/zot) on GitHub, clone your fork, and track the main repository:
+
+```bash
+git clone git@github.com:<your-username>/zot.git
+cd zot
+git remote add project-zot https://github.com/project-zot/zot.git
+git fetch project-zot
+```
+
+## Build
+
+All binaries are written to `bin/`. Set `OS` and `ARCH` to cross-compile. The defaults are `linux` and `amd64`.
+
+| Target | Builds | Output |
+|---|---|---|
+| `make binary` | Full zot with all extensions | `bin/zot-<os>-<arch>` |
+| `make binary-minimal` | Minimal Distribution Specification zot, no extensions | `bin/zot-<os>-<arch>-minimal` |
+| `make binary-debug` | Full zot with debug symbols and debug extensions | `bin/zot-<os>-<arch>-debug` |
+| `make cli` | `zli` command-line client | `bin/zli-<os>-<arch>` |
+| `make bench` | `zb` benchmarking tool | `bin/zb-<os>-<arch>` |
+| `make exporter-minimal` | `zxp` metrics exporter for the minimal build | `bin/zxp-<os>-<arch>` |
+| `make oci-image` | Container image built with [stacker](https://github.com/project-stacker/stacker) | |
+| `make docker-image` | Container image built with Docker | `zot-<os>-<arch>:latest` |
+
+For example, to build a full binary for an Intel-based Linux server:
+
+```bash
+make OS=linux ARCH=amd64 binary
+```
+
+To build with only some extensions, list them in `EXTENSIONS`. See [Develop extensions](/developers/extensions#build-with-selected-extensions).
+
+<Note>
+  The default target, `make` (alias `make all`), builds every binary, then runs the linters, config verification, and all tests. It takes a long time. Run it before you open a pull request, and use individual targets while you iterate.
+</Note>
+
+## Run zot
+
+zot's behavior is controlled entirely by its configuration file. Start a server with a sample configuration from the repository:
+
+```bash
+bin/zot-linux-amd64 serve examples/config-minimal.json
+```
+
+The `examples/` directory has configurations for most features. See also [Configuration examples](/configuration/examples).
+
+## Test and lint
+
+| Command | What it does |
+|---|---|
+| `make test` | Runs unit tests for the full build, the minimal build, and dev mode |
+| `make test-extended` | Unit tests with all extensions |
+| `make test-minimal` | Unit tests for the minimal build |
+| `make check` | Runs `golangci-lint` for every build tag combination |
+| `make verify-config` | Validates the example configuration files with `zot verify` |
+| `make run-blackbox-tests` | Runs the Bats blackbox tests in `test/blackbox` |
+| `make swagger` | Regenerates the Swagger files after you change API annotations |
+| `make gqlgen` | Regenerates GraphQL code after you change the schema |
+
+<Warning>
+  CI fails if generated files are out of date. Commit the output of `make swagger` and `make gqlgen` with your change.
+</Warning>
+
+## Debug
+
+Build with `binary-debug`, then attach a debugger such as [Delve](https://github.com/go-delve/delve) to the running process:
+
+```bash
+make OS=linux ARCH=amd64 binary-debug
+```
+
+The debug binary is built without optimizations and with inlining disabled, so stepping through code behaves predictably.
+
+## Profile
+
+Administrators can collect CPU, memory, and trace profiles from a running zot. See [Profile performance](/operations/profiling).
+
+## Code organization
+
+```text
+.
+├── cmd/              # main() for each binary
+│   ├── zot/          # the registry server
+│   ├── zli/          # command-line client
+│   ├── zb/           # benchmarking tool
+│   └── zxp/          # metrics exporter for the minimal build
+├── pkg/              # libraries
+│   ├── api/          # HTTP handlers, authn and authz middleware
+│   │   └── config/   # configuration model
+│   ├── storage/      # storage drivers: local, S3, GCS, Azure
+│   ├── meta/         # MetaDB: BoltDB, Redis, and DynamoDB drivers
+│   ├── extensions/   # optional features (search, sync, scrub, ...)
+│   ├── cli/          # zot and zli command-line logic
+│   ├── cluster/      # scale-out clustering
+│   ├── retention/    # tag retention policies
+│   ├── scheduler/    # background task scheduler
+│   ├── cel/          # CEL conditions used in access control
+│   ├── requestcontext/ # per-request user and access information
+│   ├── compliance/   # Distribution Specification conformance tests
+│   ├── exporter/     # metrics exporter library
+│   ├── log/          # logging
+│   └── common/       # shared helpers
+├── errors/           # error definitions
+├── examples/         # configuration examples
+├── swagger/          # generated Swagger files
+├── test/             # blackbox tests, test data, and scripts
+└── build/            # Dockerfiles and stacker files
+```
+
+## Additional state
+
+Besides image content, zot keeps working data in its storage root directory (`storage.rootDirectory`) and in external databases.
+
+| Data | Location | Description |
+|---|---|---|
+| Image blobs | Local storage, S3, GCS, or Azure | Content in OCI image layout |
+| Metadata | `meta.db` in the root directory, or Redis, or DynamoDB | Manifests, configs, download counters, signature verification results |
+| Deduplication cache | `cache.db` in the root directory, or Redis, or DynamoDB | Tracks which blobs are deduplicated |
+| In-progress uploads | `.uploads` in each repository | Temporary blob upload data |
+| Sync staging | `.sync` in each repository | Upstream blobs are staged here, then copied into the repository |
+| CVE database | `_trivy` in the root directory | Vulnerability database and scan results |
+| User sessions | `_sessions` in the root directory | Web UI session data, unless you configure an external session store |
+| Signature keys and certificates | `_cosign` and `_notation` in the root directory | Public keys and certificates uploaded for signature verification |
+
+See [Storage overview](/configuration/storage/overview) and [Cache drivers](/configuration/storage/cache-drivers).

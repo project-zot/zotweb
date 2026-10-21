@@ -1,0 +1,105 @@
+---
+title: "Search API"
+description: "The GraphQL endpoint of the search extension: request format, responses, and limits."
+icon: "magnifying-glass"
+---
+
+The `search` extension serves one GraphQL endpoint. You send it queries for images, repositories, tags, referrers, and vulnerabilities. This page is the endpoint reference. For the queries themselves, see [Search with GraphQL](/use/search-graphql) and the [query examples](/use/search-graphql-examples).
+
+## Endpoint
+
+<ParamField path="/v2/_zot/ext/search" type="GET | POST">
+  The GraphQL endpoint. It's available when the [`search` extension](/configuration/extensions#search) is enabled. The extension appears in the `endpoints` list of [`/v2/_oci/ext/discover`](/api-reference/registry/list-registry-level-extensions).
+</ParamField>
+
+The search endpoint isn't part of the OpenAPI spec, because the GraphQL schema describes its operations. Read the schema with [introspection](https://graphql.org/learn/introspection/), or from `pkg/extensions/search/schema.graphql` in the [zot repository](https://github.com/project-zot/zot).
+
+## Request
+
+<Tabs>
+  <Tab title="POST">
+    Send a JSON body with a `query` field. Add `variables` and `operationName` if you use them.
+
+    ```bash
+    curl -X POST http://localhost:5000/v2/_zot/ext/search \
+      -H "Content-Type: application/json" \
+      -d '{"query": "{ ImageList(repo: \"busybox\") { Results { Tag Digest } } }"}'
+    ```
+  </Tab>
+  <Tab title="GET">
+    Put the query in the `query` URL parameter. Encode it.
+
+    ```bash
+    curl -G http://localhost:5000/v2/_zot/ext/search \
+      --data-urlencode 'query={ ImageList(repo: "busybox") { Results { Tag Digest } } }'
+    ```
+  </Tab>
+</Tabs>
+
+<ParamField body="query" type="string" required>
+  The GraphQL document.
+</ParamField>
+<ParamField body="variables" type="object">
+  Values for variables declared in the query.
+</ParamField>
+<ParamField body="operationName" type="string">
+  Which operation to run when the document defines more than one.
+</ParamField>
+
+## Response
+
+The response is JSON. A successful query puts the result under `data`. Problems with a query, such as an unknown field or a disabled feature, appear in an `errors` array.
+
+```json
+{
+  "data": {
+    "ImageList": {
+      "Results": [
+        { "Tag": "latest", "Digest": "sha256:<digest>" }
+      ]
+    }
+  }
+}
+```
+
+```json
+{
+  "errors": [
+    { "message": "cve search is disabled" }
+  ]
+}
+```
+
+<Note>
+  CVE queries return `cve search is disabled` unless CVE scanning is configured. See [CVE scanning](/security/cve-scanning).
+</Note>
+
+## Authentication and access control
+
+The endpoint uses the registry's [authentication](/security/authentication), so pass credentials the same way as for any other API call. Results include only the repositories and images that the user can read. See [Access control](/security/access-control).
+
+The `disableAnonymousCatalog` option in [access control](/security/access-control) also limits what anonymous callers see here.
+
+## Limits
+
+zot rejects queries that could be expensive to process.
+
+| Limit | Value |
+|---|---|
+| Request body size | 1 MiB |
+| Tokens in one document | 2,000 |
+| Total query complexity | 500 |
+| Query cache | Parsed queries are cached |
+
+See [Request limits](/use/search-graphql#request-limits) for argument-level limits, such as the `GlobalSearch` query length and the CVE page size.
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Search with GraphQL" icon="book" href="/use/search-graphql">
+    Supported queries, pagination, sorting, and filters.
+  </Card>
+  <Card title="Query examples" icon="code" href="/use/search-graphql-examples">
+    Ready-to-run queries with responses.
+  </Card>
+</CardGroup>

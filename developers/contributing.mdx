@@ -1,0 +1,112 @@
+---
+title: "Contribute"
+description: "How to submit changes to zot, report issues, and follow the code of conduct."
+icon: "code-pull-request"
+---
+
+zot is built for developers by developers, and the project welcomes contributions. Pull requests are welcome even for small fixes such as typos. For a significant change, open an issue and discuss it before you start.
+
+## Before you start
+
+<Steps>
+  <Step title="Set up your environment">
+    Follow [Onboard for development](/developers/onboarding) to fork, clone, and build zot.
+  </Step>
+  <Step title="Discuss large changes">
+    Open a GitHub issue for new features or designs. The maintainers review proposals to keep the overall architecture consistent and avoid duplicated work.
+  </Step>
+  <Step title="Work in small pieces">
+    Submit a series of small pull requests instead of one large one. Each change that merges to `main` must not break anything.
+  </Step>
+</Steps>
+
+## Submission requirements
+
+All contributions must:
+
+- Follow the [Apache License 2.0](https://github.com/project-zot/zot/blob/main/LICENSE).
+- Come from a pull request (PR) from your fork.
+- Have signed-off commits that follow the commit message format.
+
+### License statement
+
+Include this statement in the commit message or the PR description:
+
+> By submitting this pull request, I confirm that my contribution is made under the terms of the Apache 2.0 license.
+
+### Developer Certificate of Origin
+
+Every commit needs a `Signed-off-by:` line (the Developer Certificate of Origin). Add it with the `-s` flag:
+
+```bash
+git commit -s -m "fix: correct the tag listing order"
+```
+
+CI runs a DCO check on every pull request.
+
+### Commit message format
+
+Commit messages follow the [Conventional Commits](https://www.conventionalcommits.org/) format. The first line starts with one of these types, an optional scope in parentheses, an optional `!` for breaking changes, and a colon:
+
+`build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`, `style`, `test`
+
+```text
+docs: fix a typo in module.md
+feat(sync): add platform selection for periodic sync
+```
+
+CI checks every commit in the pull request against this format and also limits lines to 74 characters.
+
+### Code style
+
+- Follow the Go community [code review guidelines](https://github.com/golang/go/wiki/CodeReviewComments).
+- Keep lines to about 120 columns in code and Markdown.
+- Run `make` before you commit. It compiles, lints with golangci-lint, and runs the tests. Fix lint reports in the code. Code coverage must not drop as code is added or changed.
+
+### Documentation
+
+Update the documentation when you add or change a feature. Good documentation is as important as the code.
+
+### Pull request form and review
+
+A short form on the pull request asks for details about the change. The code owners are identified automatically and notified.
+
+## Continuous integration
+
+Every pull request runs a CI pipeline in GitHub Actions. It compiles zot and runs unit tests, linters, and checks for:
+
+- Code coverage and security scanning
+- Performance regressions
+- Distribution Specification conformance
+- Compatibility with ecosystem client tools
+- DCO sign-off and commit message format
+
+## Report an issue
+
+Well-written bug reports are a valuable contribution.
+
+<Steps>
+  <Step title="Search first">
+    Look through the [existing issues](https://github.com/project-zot/zot/issues). If you find a match, subscribe to it and add any new details as a comment.
+  </Step>
+  <Step title="File a new issue">
+    Click **New issue** and answer the template questions. Include:
+
+    - Your build environment, such as the Go version
+    - Your zot configuration file
+    - Logs, as configured
+    - Steps to reproduce the problem
+  </Step>
+</Steps>
+
+<Warning>
+  Issues are public. Remove sensitive information such as user names, passwords, IP addresses, and company names from logs and configuration files. Replace them with `REDACTED` or similar.
+</Warning>
+
+## Report a security issue
+
+Don't file a public issue for a vulnerability. Report it privately instead, using a [private security advisory](https://github.com/project-zot/zot/security/advisories) on GitHub, or follow the instructions in the [security policy](https://github.com/project-zot/zot/blob/main/SECURITY.md).
+
+## Code of conduct
+
+The zot project follows the [CNCF Code of Conduct](https://github.com/cncf/foundation/blob/main/code-of-conduct.md). See [`CODE_OF_CONDUCT.md`](https://github.com/project-zot/zot/blob/main/CODE_OF_CONDUCT.md) in the repository for how to report a conduct incident.
