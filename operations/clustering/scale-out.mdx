@@ -1,0 +1,354 @@
+---
+title: "Scale-out clustering"
+description: "Spread repositories across a cluster of zot instances to handle more images and a higher request rate."
+icon: "up-right-and-down-left-from-center"
+---
+
+When you have a large number of images, a high request rate, or both, you can share the work across a cluster of zot instances. zot supports two ways to scale: scale **compute only**, with all instances sharing one cache and one storage backend, or scale **compute and storage**, with each instance using its own.
+
+<Info>
+  Built-in scale-out clustering is available in zot v2.1.0 and later.
+</Info>
+
+## How scale-out differs from high availability
+
+[High availability](/operations/clustering/high-availability) keeps the service running if an instance or its storage goes offline. Scale-out doesn't. If an instance or its storage goes offline, service for the affected repositories is impacted. Choose scale-out for capacity. See the [clustering overview](/operations/clustering/overview) to compare the two.
+
+## How it works
+
+Each repository is served by **one** zot instance, and only that instance writes to the repository. When any instance in the cluster receives a push or pull for a repository:
+
+1. It hashes the repository name and uses the hash to look up which member owns the repository.
+2. If another member owns it, the receiving instance forwards the request to that member and returns the response to the client, acting as a proxy.
+3. If it owns the repository itself, it handles the request locally.
+
+<Frame caption="A load balancer sends each request to any instance. The instances route it to the owner of the repository.">
+  <img src="/images/zot-scale-out.jpg" alt="Diagram: a load balancer sends traffic to a stack of zot instances, which use remote storage" style={{ maxWidth: "460px" }} />
+</Frame>
+
+zot hashes with [SipHash](https://en.wikipedia.org/wiki/SipHash) keyed by `cluster.hashKey`. A keyed hash prevents an attacker from steering all requests to one instance. The owner is the member at position `hash mod number-of-members` in the `members` list.
+
+A proxied request carries a hop-count header. A member that receives a request which is already proxied, but which it doesn't own, rejects it with `508 Loop Detected` instead of forwarding it again. This usually points to members whose `members` lists differ.
+
+## Configure the cluster
+
+Every instance has the same `cluster` section:
+
+```json
+"cluster": {
+  "members": [
+    "zot-server1:9000",
+    "zot-server2:9000",
+    "zot-server3:9000"
+  ],
+  "hashKey": "<16-character-secret>",
+  "tls": {
+    "cacert": "/etc/zot/certs/ca.crt"
+  }
+}
+```
+
+<ParamField path="cluster.members" type="array of string" required>
+  The `host:port` of every instance in the cluster, **including the local one**. Each entry must be an address that instance can be reached on, either an IP address or a host name. Host names are resolved to find which entry is the local instance.
+
+  - Give every instance **the same list in the same order**. The order determines which member owns which repository.
+  - At startup, each instance must find itself in the list by matching one of its own sockets. If it can't, zot stops with the error `failed to determine the local cluster socket`.
+  - A cluster with a single member behaves like a standalone registry. At least one member is required.
+  - For convenience, run zot on the same port on every instance.
+</ParamField>
+
+<ParamField path="cluster.hashKey" type="string" required>
+  The key for the SipHash function. It must be exactly 16 characters (128 bits). All members must use the same value. Treat it like a secret, because it controls how repositories are spread across members.
+</ParamField>
+
+<ParamField path="cluster.tls" type="object">
+  TLS settings for requests that members send to each other.
+
+  - `cacert`: a CA certificate file that signs the members' server certificates
+  - `cert` and `key`: a client certificate and key that this member presents to its peers, if they require mutual TLS
+</ParamField>
+
+<Note>
+  When `http.tls` is configured, members proxy to each other over HTTPS and always verify the peer's certificate. Otherwise they use plain HTTP.
+</Note>
+
+<Warning>
+  The owner of a repository is `hash mod number-of-members`. If you add, remove, or reorder members, most repositories change owners. With shared storage, this is safe after a restart because all members see the same data. With local storage, repositories stay on the instance that stored them, so they appear to vanish. Resize a local-storage cluster only if you can move data.
+</Warning>
+
+## Compute-only scale-out
+
+In this approach every instance shares one cache and one S3-compatible storage backend.
+
+### Requirements
+
+- All instances use the same shared S3-compatible storage and the same shared cache. There's no local cache in the instances.
+- Each instance has its own IP address.
+- The examples below set `"dedupe": false` and `"remoteCache": true`, as in the zot example configurations for scale-out.
+
+### Registry only
+
+This example is a cluster that serves as a registry only, with no web UI. All instances share the same S3 configuration and a DynamoDB cache. Use the same file on every member, apart from member-specific values such as the address.
+
+<Tabs>
+  <Tab title="DynamoDB cache">
+    ```json
+    {
+      "distSpecVersion": "1.1.1",
+      "storage": {
+        "rootDirectory": "/tmp/zot",
+        "dedupe": false,
+        "remoteCache": true,
+        "storageDriver": {
+          "name": "s3",
+          "rootdirectory": "/zot",
+          "region": "us-east-1",
+          "regionendpoint": "localhost:4566",
+          "bucket": "zot-storage",
+          "forcepathstyle": true,
+          "secure": false,
+          "skipverify": false
+        },
+        "cacheDriver": {
+          "name": "dynamodb",
+          "endpoint": "http://localhost:4566",
+          "region": "us-east-1",
+          "cacheTablename": "ZotBlobTable",
+          "repoMetaTablename": "ZotRepoMetadataTable",
+          "imageMetaTablename": "ZotImageMetaTable",
+          "repoBlobsInfoTablename": "ZotRepoBlobsInfoTable",
+          "userDataTablename": "ZotUserDataTable",
+          "versionTablename": "ZotVersion",
+          "apiKeyTablename": "ZotApiKeyTable"
+        }
+      },
+      "http": {
+        "address": "0.0.0.0",
+        "port": "9000"
+      },
+      "log": { "level": "debug" },
+      "cluster": {
+        "members": [
+          "zot-server1:9000",
+          "zot-server2:9000",
+          "zot-server3:9000"
+        ],
+        "hashKey": "loremipsumdolors"
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Redis cache">
+    ```json
+    {
+      "distSpecVersion": "1.1.1",
+      "storage": {
+        "rootDirectory": "/tmp/zot",
+        "dedupe": false,
+        "remoteCache": true,
+        "storageDriver": {
+          "name": "s3",
+          "rootdirectory": "/zot",
+          "region": "us-east-1",
+          "regionendpoint": "localhost:4566",
+          "bucket": "zot-storage",
+          "forcepathstyle": true,
+          "secure": false,
+          "skipverify": false
+        },
+        "cacheDriver": {
+          "name": "redis",
+          "url": "redis://localhost:6379",
+          "keyprefix": "zot"
+        }
+      },
+      "http": {
+        "address": "0.0.0.0",
+        "port": "9000"
+      },
+      "log": { "level": "debug" },
+      "cluster": {
+        "members": [
+          "zot-server1:9000",
+          "zot-server2:9000",
+          "zot-server3:9000"
+        ],
+        "hashKey": "loremipsumdolors"
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+  `loremipsumdolors` is a placeholder. Generate your own 16-character value and keep it secret. The endpoints above point to a local emulator. In production, use your real S3 endpoint and credentials, and see [Amazon S3](/configuration/storage/s3) and [Cache drivers](/configuration/storage/cache-drivers).
+</Warning>
+
+To secure traffic between members, add `http.tls` and `cluster.tls`:
+
+```json
+"http": {
+  "address": "0.0.0.0",
+  "port": "9000",
+  "tls": {
+    "cert": "/etc/zot/certs/server.crt",
+    "key": "/etc/zot/certs/server.key"
+  }
+},
+"cluster": {
+  "members": ["zot-server1:9000", "zot-server2:9000", "zot-server3:9000"],
+  "hashKey": "<16-character-secret>",
+  "tls": { "cacert": "/etc/zot/certs/ca.crt" }
+}
+```
+
+### Use the web UI and zli
+
+For the web UI or `zli` to work, every instance must share the same session information. Configure an external Redis-compatible session store with `http.auth.sessionDriver`, shared by all members. See [OpenID Connect](/security/openid) for the session settings.
+
+This example enables the UI. All instances share the S3 configuration, a Redis cache, and a Redis session store:
+
+```json
+{
+  "distSpecVersion": "1.1.1",
+  "storage": {
+    "rootDirectory": "/tmp/zot",
+    "dedupe": false,
+    "remoteCache": true,
+    "storageDriver": {
+      "name": "s3",
+      "rootdirectory": "/zot",
+      "region": "us-east-1",
+      "regionendpoint": "localhost:4566",
+      "bucket": "zot-storage",
+      "forcepathstyle": true,
+      "secure": false,
+      "skipverify": false
+    },
+    "cacheDriver": {
+      "name": "redis",
+      "url": "redis://localhost:6379",
+      "keyprefix": "zot"
+    }
+  },
+  "http": {
+    "address": "0.0.0.0",
+    "port": "9000",
+    "auth": {
+      "htpasswd": { "path": "/etc/zot/htpasswd" },
+      "sessionDriver": {
+        "name": "redis",
+        "url": "redis://localhost:6379",
+        "keyprefix": "zotsession"
+      }
+    }
+  },
+  "log": { "level": "debug" },
+  "cluster": {
+    "members": [
+      "zot-server1:9000",
+      "zot-server2:9000",
+      "zot-server3:9000"
+    ],
+    "hashKey": "loremipsumdolors"
+  },
+  "extensions": {
+    "search": { "enable": true },
+    "ui": { "enable": true }
+  }
+}
+```
+
+<Tip>
+  Without an external session store, a load balancer can pin each client to one instance with a sticky-session cookie. An HAProxy backend might use `balance roundrobin`, `cookie SERVER insert indirect nocache`, and `cookie <name>` on each `server` line.
+</Tip>
+
+## Compute and storage scale-out
+
+In the typical case, the shared S3-compatible storage scales along with the number of instances. zot also supports a cluster in which **the cache and storage are local to each instance**:
+
+```json
+{
+  "distSpecVersion": "1.1.1",
+  "storage": {
+    "rootDirectory": "/var/lib/registry"
+  },
+  "http": {
+    "address": "0.0.0.0",
+    "port": "9000"
+  },
+  "log": { "level": "debug" },
+  "cluster": {
+    "members": [
+      "zot-server1:9000",
+      "zot-server2:9000",
+      "zot-server3:9000"
+    ],
+    "hashKey": "loremipsumdolors"
+  }
+}
+```
+
+<Warning>
+  Using the web UI isn't supported in this deployment. Because each instance stores only the repositories it owns, don't resize the cluster without a plan to move the data.
+</Warning>
+
+## Send client traffic to the cluster
+
+Either of two schemes works.
+
+<Tabs>
+  <Tab title="Single entry point">
+    A load balancer such as [HAProxy](https://www.haproxy.com/) forwards each request to any instance. The load balancer doesn't need to know which instance owns which repository, because the instances work that out themselves. To add capacity, add the new instances to the load balancer.
+
+    ```text
+    frontend zot
+        bind *:8080
+        mode http
+        default_backend zot-cluster
+
+    backend zot-cluster
+        mode http
+        balance roundrobin
+        option httpchk GET /readyz
+        server zot1 127.0.0.1:8081 check
+        server zot2 127.0.0.1:8082 check
+        server zot3 127.0.0.1:8083 check
+    ```
+  </Tab>
+  <Tab title="DNS-based">
+    Because scale-out simplifies the load balancer's role, you may not need one. A scheme such as [DNS-based routing](https://coredns.io/plugins/loadbalance/) exposes the instances directly to clients.
+
+    <Note>
+      If you need sticky-session cookies, this scheme may not suit you.
+    </Note>
+  </Tab>
+</Tabs>
+
+## When an instance fails
+
+A scale-out cluster isn't self-healing. If an instance fails, only the repositories it owns are affected. If the failure isn't transient, resize the cluster and restart it to exclude that instance. With local storage, plan for the data on the failed instance.
+
+## Limitations
+
+<AccordionGroup>
+  <Accordion title="CVE scanning">
+    CVE scanning isn't supported with remote (cloud) storage, and zot refuses to start with it enabled. Run a CVE repository on a zot instance outside the cluster that uses local disk and Trivy as the detection engine. See [CVE scanning](/security/cve-scanning).
+  </Accordion>
+  <Accordion title="Image trust (signature verification)">
+    By default the trust extension keeps its keys and certificates in a directory under the zot root directory, which is local to each instance. That doesn't work across a cluster. When you use the DynamoDB cache driver, zot stores them in AWS Secrets Manager instead, which all instances can share. See [Verify image signatures](/security/signatures).
+  </Accordion>
+  <Accordion title="Sync">
+    [Mirroring and sync](/operations/mirroring), on demand or periodic, works with scale-out. The repository name is hashed to one instance, and only that instance syncs the repository.
+  </Accordion>
+  <Accordion title="Proxied requests">
+    zot proxies the repository-scoped Distribution Specification APIs (manifests, blobs, uploads, tags, and referrers). Requests that don't name a repository, such as the catalog, are answered by the instance that receives them, so the catalog reflects the storage that instance can see.
+  </Accordion>
+</AccordionGroup>
+
+## Related
+
+- [Clustering overview](/operations/clustering/overview)
+- [Cache drivers](/configuration/storage/cache-drivers)
+- [Amazon S3](/configuration/storage/s3)
+- [Configuration examples](/configuration/examples#scale-out-cluster-member)

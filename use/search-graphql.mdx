@@ -1,0 +1,182 @@
+---
+title: "Search with GraphQL"
+description: "Query images, repositories, CVEs, and referrers with the zot search extension's GraphQL API."
+icon: "magnifying-glass"
+---
+
+The `search` extension runs a GraphQL server inside the registry. You send it a GraphQL query and it returns exactly the fields you ask for. It's much faster than walking the registry with the core APIs, because zot answers from its metadata database.
+
+<Tip>
+  Prefer a ready-made client? [`zli`](/use/zli) wraps these queries in commands, and the [web UI](/use/web-ui) uses them too. Use GraphQL directly when you need custom queries or want to integrate zot search into your own tools.
+</Tip>
+
+## Before you begin
+
+Enable the `search` extension. Add CVE scanning if you want the CVE queries to work. See [Enable extensions](/configuration/extensions).
+
+```json
+{
+  "extensions": {
+    "search": {
+      "enable": true,
+      "cve": {
+        "updateInterval": "2h"
+      }
+    }
+  }
+}
+```
+
+<Note>
+  The search extension is available only in the full zot image. The CVE queries (`CVEListForImage`, `CVEDiffListForImages`, `ImageListForCVE`, and `ImageListWithCVEFixed`) return a `cve search is disabled` error unless `search.cve` is configured. See [CVE scanning](/security/cve-scanning).
+</Note>
+
+## Send a query
+
+<Tabs>
+  <Tab title="curl (POST)">
+    Send a JSON body with a `query` field to the search endpoint, `/v2/_zot/ext/search`:
+
+    ```bash
+    curl -X POST -H "Content-Type: application/json" \
+      --data '{ "query": "{ ImageListForCVE(id: \"CVE-2002-1119\") { Results { RepoName Tag } } }" }' \
+      http://localhost:5000/v2/_zot/ext/search
+    ```
+
+    The reply is a JSON document with your result under `data`.
+  </Tab>
+  <Tab title="curl (GET)">
+    The endpoint also accepts GET requests with the query in the URL:
+
+    ```bash
+    curl -G http://localhost:5000/v2/_zot/ext/search \
+      --data-urlencode 'query={ ImageList(repo: "ubuntu") { Results { Tag Digest } } }'
+    ```
+  </Tab>
+  <Tab title="GraphQL Playground">
+    The Playground is an interactive browser environment where you build queries and inspect the schema. It's available only in a `binary-debug` build, or a build with the `debug` extension label.
+
+    ```text
+    http://localhost:5000/v2/_zot/debug/graphql-playground#
+    ```
+  </Tab>
+</Tabs>
+
+You can run [introspection](https://graphql.org/learn/introspection/) against the endpoint to read the full schema. The schema file, `schema.graphql`, is also in the zot repository under `pkg/extensions/search`.
+
+### Authentication and access control
+
+The search endpoint uses the same [authentication](/security/authentication) as the rest of the registry. Add credentials as you would for any other API call, for example `-u user:password`.
+
+Results respect [access control](/security/access-control): you only see repositories and images you're allowed to read. Fields such as `IsBookmarked`, `IsStarred`, and `IsDeletable` depend on the current user.
+
+### Request limits
+
+zot rejects queries that could be expensive to process.
+
+| Limit | Value |
+|---|---|
+| Request body size | 1 MiB |
+| Tokens in one GraphQL document | 2,000 |
+| Total query complexity | 500 (each requested field counts as 1, summed through nested fields) |
+| `query` argument of `GlobalSearch` | 256 characters |
+| `limit` in a CVE page | 4,096 |
+
+## Supported queries
+
+| Query | Purpose | Key arguments |
+|---|---|---|
+| `GlobalSearch` | Search repositories and images by name, or tags inside a repository | `query`, `filter`, `requestedPage` |
+| `ImageList` | All images in a repository, or in every repository when `repo` is `""` | `repo`, `requestedPage` |
+| `RepoListWithNewestImage` | Every repository with its newest image | `requestedPage` |
+| `ExpandedRepoInfo` | A repository summary plus all its images | `repo` |
+| `Image` | Details of one image | `image` (`repo:tag`) |
+| `ImageListForDigest` | Images that contain a digest (manifest, config, or layer) | `id`, `requestedPage` |
+| `DerivedImageList` | Images built on top of an image | `image`, `digest`, `requestedPage` |
+| `BaseImageList` | Images that an image is built from | `image`, `digest`, `requestedPage` |
+| `Referrers` | Artifacts that refer to a digest, such as signatures and SBOMs | `repo`, `digest`, `type` |
+| `CVEListForImage` | CVEs affecting an image | `image`, `searchedCVE`, `excludedCVE`, `severity`, `requestedPage` |
+| `CVEDiffListForImages` | CVEs present in one image but not another | `minuend`, `subtrahend`, `searchedCVE`, `excludedCVE`, `requestedPage` |
+| `ImageListForCVE` | Images affected by a CVE | `id`, `filter`, `requestedPage` |
+| `ImageListWithCVEFixed` | Images in a repository that are no longer affected by a CVE | `id`, `image` (repository), `filter`, `requestedPage` |
+| `StarredRepos` | Repositories the current user starred | `requestedPage` |
+| `BookmarkedRepos` | Repositories the current user bookmarked | `requestedPage` |
+
+See [GraphQL search examples](/use/search-graphql-examples) for a query and response for each one.
+
+<Note>
+  An image reference in `image` arguments is `repository:tag`, and `CVEListForImage` also accepts `repository@digest`. Arguments typed `ImageInput` take separate `Repo`, `Tag`, optional `Digest`, and optional `Platform` fields.
+</Note>
+
+## Search by name with GlobalSearch
+
+`GlobalSearch` takes one `query` string:
+
+- A plain string such as `ubuntu` searches **repository names**. Matching is case-insensitive.
+- A string with a colon, such as `ubuntu:latest`, searches **tags** inside the matching repositories.
+- An empty string `""` matches everything.
+
+It returns `Repos`, `Images`, and `Layers` in one `GlobalSearchResult`. Request only the lists you need. Layer search isn't implemented, so `Layers` is always empty.
+
+## Pagination and sorting
+
+List queries take a `requestedPage` argument:
+
+```graphql
+requestedPage: { limit: 10, offset: 20, sortBy: UPDATE_TIME }
+```
+
+<ParamField path="limit" type="Int">
+  Maximum number of results to return. Can't be negative.
+</ParamField>
+<ParamField path="offset" type="Int">
+  Number of results to skip. It counts results, not pages, so page 3 with `limit: 10` is `offset: 20`. Can't be negative.
+</ParamField>
+<ParamField path="sortBy" type="SortCriteria">
+  Sort order. Defaults to `ALPHABETIC_ASC` for images and repositories, and `SEVERITY` for CVEs.
+</ParamField>
+
+- Omit `requestedPage`, or send `limit` and `offset` as `0`, to get every result.
+- Always set `limit` when you set a non-zero `offset`. With no `limit`, a non-zero `offset` returns an empty list.
+- Ask for `Page { TotalCount ItemCount }` to learn how many results exist in total and how many are on this page.
+
+### Sort criteria
+
+| `sortBy` | Applies to |
+|---|---|
+| `ALPHABETIC_ASC`, `ALPHABETIC_DSC` | Images, repositories, CVEs |
+| `RELEVANCE` | Images and repositories |
+| `UPDATE_TIME` | Images and repositories (newest first) |
+| `DOWNLOADS` | Images and repositories |
+| `SEVERITY` | CVEs (most severe first) |
+
+<Warning>
+  The schema also lists `STARS`, but the image and repository queries don't support it, and a request with `sortBy: STARS` returns an error. Use `DOWNLOADS` or `UPDATE_TIME` instead.
+</Warning>
+
+## Filter results
+
+`GlobalSearch`, `ImageListForCVE`, and `ImageListWithCVEFixed` accept a `filter` argument:
+
+| Field | Type | Effect |
+|---|---|---|
+| `Os` | `[String]` | Only images or repositories for these operating systems |
+| `Arch` | `[String]` | Only images or repositories for these architectures |
+| `HasToBeSigned` | `Boolean` | Only images or repositories with at least one signature |
+| `IsBookmarked` | `Boolean` | Only bookmarked or non-bookmarked results |
+| `IsStarred` | `Boolean` | Only starred or non-starred results |
+
+Use Go's `GOOS` and `GOARCH` names for `Os` and `Arch`, for example `linux` and `arm64`.
+
+```graphql
+{
+  GlobalSearch(query: "alpine", filter: { Os: ["linux"], Arch: ["arm64"], HasToBeSigned: true }) {
+    Images { RepoName Tag }
+  }
+}
+```
+
+## Learn more about GraphQL
+
+- [Introduction to GraphQL](https://graphql.org/learn/)
+- [The Fullstack Tutorial for GraphQL](https://www.howtographql.com/)

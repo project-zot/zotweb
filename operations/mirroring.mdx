@@ -1,0 +1,702 @@
+---
+title: "Mirroring and sync"
+description: "Mirror upstream OCI registries into zot, as a pull-through cache or a full copy."
+icon: "arrows-rotate"
+---
+
+A zot registry can mirror one or more upstream registries, including Docker Hub, Google registries, and AWS ECR. If the upstream is conformant to the OCI Distribution Specification for pulling images, you can use zot's `sync` [extension](/concepts/extensions) to keep a downstream copy of its images and their artifacts.
+
+Because zot stores synced images locally, mirroring supports a fully disconnected container build pipeline. Image operations end in local storage, which can reduce latency and network costs.
+
+<Warning>
+  Beginning with v2.1.22, sync preserves upstream media types and digests. To sync Docker-format images (`application/vnd.docker.distribution.manifest.v2+json`), set [`http.compat`](/configuration/http#docker-image-format-compatibility) to `["docker2s2"]`. Without it, zot rejects Docker schema 2 content instead of converting it.
+</Warning>
+
+`sync` is available in the full zot image only. See [Releases and images](/install/releases).
+
+## Mirroring modes
+
+You choose how zot fills its local copy:
+
+<Tabs>
+  <Tab title="Pull-through cache (on demand)">
+    zot downloads an image the first time a client asks for it, and stores it. Later requests are served locally. Images nobody requests are never downloaded. If you also set a `pollInterval`, zot periodically checks the upstream and updates cached images that changed.
+
+    ```json
+    {
+      "urls": ["https://index.docker.io"],
+      "onDemand": true
+    }
+    ```
+
+    <Info>
+      Docker Hub rate-limits pulls and doesn't support catalog listing. Use on-demand mirroring with Docker Hub, not polled mirroring.
+    </Info>
+  </Tab>
+  <Tab title="Full mirror (periodic)">
+    Like a `git clone`, zot keeps a full copy of the content you select and refreshes it on a schedule. Set `pollInterval` and `content`, and leave `onDemand` off.
+
+    ```json
+    {
+      "urls": ["https://registry1:5000"],
+      "onDemand": false,
+      "pollInterval": "6h",
+      "content": [{ "prefix": "/repo1/**" }]
+    }
+    ```
+  </Tab>
+  <Tab title="Both">
+    Serve missing images on demand and also keep a selected set fresh on a schedule.
+
+    ```json
+    {
+      "urls": ["https://registry1:5000"],
+      "onDemand": true,
+      "pollInterval": "12h",
+      "content": [{ "prefix": "/repo1/**" }]
+    }
+    ```
+  </Tab>
+  <Tab title="Background on demand">
+    On a local miss, return `404` immediately and fill the image in the background. See [On-demand sync in the background](#on-demand-sync-in-the-background).
+  </Tab>
+</Tabs>
+
+This table shows how three settings combine. A registry entry that does nothing in either mode is skipped.
+
+| `onDemand` | `pollInterval` | `content` | Result |
+|---|---|---|---|
+| `false` | omitted | omitted | Sync is off |
+| `false` | set | omitted | Sync is off |
+| `false` | omitted | at least 1 entry | Sync is off |
+| `false` | set | at least 1 entry | Periodic sync of images that match `content` |
+| `true` | omitted | omitted | On-demand sync of any image |
+| `true` | set | omitted | On-demand sync of any image. No periodic sync. |
+| `true` | omitted | at least 1 entry | On-demand sync of images that match `content` |
+| `true` | set | at least 1 entry | Periodic and on-demand sync of images that match `content` |
+
+## Enable compat for Docker-format images
+
+Set `http.compat: ["docker2s2"]` when either of these applies:
+
+- Upstream images use [Docker Image Manifest v2, Schema 2](https://distribution.github.io/distribution/spec/manifest-v2-2/) and you need to store them unchanged. This is common on Docker Hub and for operator and catalog images.
+- Docker-format upstream images have cosign or notation signatures and referrers tied to their Docker manifest digests.
+
+You can omit `compat` only when all synced content is OCI-formatted. Sync preserves the upstream digest either way.
+
+| Workload | `http.compat` |
+|---|---|
+| OCI-only upstream | Omit |
+| Mixed Docker and OCI upstream | `["docker2s2"]` |
+| On-demand pull-through cache for all image types | `["docker2s2"]` |
+
+<Note>
+  The `preserveDigest` setting is deprecated and ignored beginning with v2.1.22. Remove it from new configurations. Digest preservation is automatic. `http.compat` controls only whether Docker schema 2 content is accepted.
+</Note>
+
+## Configure sync
+
+You configure sync under `extensions.sync`. This example is a full mirror of two repositories:
+
+```json
+"extensions": {
+  "sync": {
+    "credentialsFile": "/etc/zot/sync-credentials.json",
+    "registries": [
+      {
+        "urls": ["https://registry1:5000"],
+        "onDemand": false,
+        "pollInterval": "6h",
+        "platforms": ["linux/amd64", "linux/arm64"],
+        "tlsVerify": true,
+        "certDir": "/etc/zot/certs",
+        "maxRetries": 3,
+        "retryDelay": "5m",
+        "maxRetryDelay": "30m",
+        "onlySigned": true,
+        "content": [
+          {
+            "prefix": "/repo2/repo",
+            "tags": {
+              "regex": "4.*",
+              "semver": true
+            },
+            "destination": "/repo2",
+            "stripPrefix": true,
+            "platforms": ["linux/amd64"]
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### Sync settings
+
+<ParamField path="extensions.sync.enable" type="boolean" default="true">
+  Defaults to `true` when the `sync` key is present. Set it to `false` to turn sync off without removing the configuration.
+</ParamField>
+
+<ParamField path="extensions.sync.credentialsFile" type="string">
+  Path to a JSON file with credentials for upstream registries, keyed by registry address. Zot ignores this file for any registry that sets a `credentialHelper`.
+
+  ```json
+  {
+    "registry1:5000": { "username": "<user>", "password": "<password>" },
+    "registry2:5000": { "username": "<user2>", "password": "<password2>" }
+  }
+  ```
+
+  Keep the file readable only by the zot user.
+</ParamField>
+
+<ParamField path="extensions.sync.downloadDir" type="string">
+  A staging directory for downloads. It's required when you use sync together with remote storage (S3, GCS, or Azure), because zot first copies images to this directory as an OCI layout and then moves them into storage. With local storage, zot stages in the storage root.
+</ParamField>
+
+<ParamField path="extensions.sync.registries" type="array of object" required>
+  The upstream registries. Each entry has the settings below.
+</ParamField>
+
+### Registry settings
+
+<ParamField path="urls" type="array of string" required>
+  One or more upstream registry URLs. If the first URL fails, zot tries the next ones in order. If several URLs are listed, zot removes any that point to itself.
+</ParamField>
+
+<ParamField path="onDemand" type="boolean" default="false">
+  If `true`, zot pulls an image from the upstream when a client requests it and it's missing locally. If `false`, zot serves only what has already been synced.
+</ParamField>
+
+<ParamField path="pollInterval" type="duration">
+  How often zot polls the upstream, for example `6h`. Without a value, or without `content`, there's no periodic sync. Don't poll Docker Hub.
+</ParamField>
+
+<ParamField path="content" type="array of object">
+  Selects which repositories and tags to pull. See [Content settings](#content-settings). Periodic sync needs at least one entry. For on-demand sync, entries filter which images may be pulled.
+</ParamField>
+
+<ParamField path="platforms" type="array of string">
+  A periodic-sync allowlist of platforms, as `os/arch[/variant]` or a bare architecture such as `amd64`. Include `""` to also copy descriptors that have no platform. zot copies only matching children of a multi-architecture index. If you omit it or give an empty list, zot copies all platforms. On-demand sync ignores it. See [Select platforms](#select-platforms-for-periodic-sync).
+</ParamField>
+
+<ParamField path="tlsVerify" type="boolean" default="true">
+  Verify the TLS certificate of the upstream. Set `false` only for testing.
+</ParamField>
+
+<ParamField path="certDir" type="string">
+  A directory of certificates (`*.crt`, `*.cert`, `*.key`) to use when connecting to the upstream. If you don't set it, zot uses the default certificate directory.
+</ParamField>
+
+<ParamField path="onlySigned" type="boolean" default="false">
+  If `true`, sync only images that have a signature (notation or cosign). Tag pulls enforce this. Digest pulls that follow a tag lookup (child manifests of an index) skip the check, so tag-to-digest client flows keep working.
+</ParamField>
+
+<ParamField path="syncLegacyCosignTags" type="boolean" default="true">
+  If `true`, sync legacy cosign and SBOM tags, which are named from the image digest, such as `sha256-<digest>.sig` or `sha256-<digest>.sbom`. Set `false` to skip them and reduce the amount of synced content.
+</ParamField>
+
+### Retries and timeouts
+
+<ParamField path="maxRetries" type="integer">
+  Maximum retries after an error during on-demand or periodic sync. Without it, zot doesn't retry. It needs `retryDelay`.
+</ParamField>
+
+<ParamField path="retryDelay" type="duration">
+  Time between retries, for example `5m`. Required when you set `maxRetries` or `maxRetryDelay`.
+</ParamField>
+
+<ParamField path="maxRetryDelay" type="duration">
+  Optional ceiling for exponential backoff. When it's greater than `retryDelay`, retry delays grow up to this value. It needs `retryDelay` and can't be smaller than it. If you omit it, the delay stays fixed at `retryDelay`.
+</ParamField>
+
+<ParamField path="syncTimeout" type="duration" default="3h">
+  The timeout for a whole sync operation, including the manifest and every blob, config, and referrer. If a requesting client disconnects, sync keeps running in the background until this timeout. That prevents sync from being cancelled by client timeouts and retries, such as those from Kubernetes.
+</ParamField>
+
+### Content settings
+
+Each `content` entry selects a set of repositories:
+
+<ParamField path="prefix" type="string" required>
+  The repository path on the upstream. Use an exact path or a [glob](https://en.wikipedia.org/wiki/Glob_(programming)) such as `*` or the recursive `**`.
+</ParamField>
+
+<ParamField path="destination" type="string">
+  The local path that stores pulled images.
+</ParamField>
+
+<ParamField path="stripPrefix" type="boolean" default="false">
+  If `true`, remove the source prefix when storing the image. If `false`, append the source prefix to `destination`. When the prefix contains glob characters such as `**`, zot removes only the segments before them and appends the rest to the destination. `stripPrefix: true` with `destination: "/"` is invalid unless the prefix contains a glob.
+</ParamField>
+
+<ParamField path="tags.regex" type="string">
+  A regular expression. zot pulls only tags that match it.
+</ParamField>
+
+<ParamField path="tags.excludeRegex" type="string">
+  A regular expression. zot skips tags that match it.
+</ParamField>
+
+<ParamField path="tags.semver" type="boolean">
+  If `true`, pull only tags that are valid [semantic versions](https://semver.org/).
+</ParamField>
+
+<ParamField path="platforms" type="array of string">
+  A platform allowlist for this content entry. It overrides the registry-level `platforms` for periodic sync. An empty list selects all platforms. If you omit it, the entry inherits the registry-level value.
+</ParamField>
+
+### Upstream request controls
+
+These apply per upstream host. They're useful when one zot serves many concurrent on-demand pulls.
+
+<ParamField path="manifestCheckInterval" type="duration" default="0s">
+  For on-demand sync, the minimum time between upstream manifest checks for a tag that is already cached. During the interval zot serves the cached manifest without contacting the upstream. The default checks on every request. Digest requests aren't affected. It requires `onDemand`, can't be negative, and can't be combined with `onDemandInBackground`.
+</ParamField>
+
+<ParamField path="reqConcurrent" type="integer" default="3">
+  Maximum concurrent requests to each upstream host. It must be greater than zero.
+</ParamField>
+
+<ParamField path="reqPerSec" type="number">
+  Maximum request rate to each upstream host. The default is unlimited. A configured value must be finite and greater than zero.
+</ParamField>
+
+<ParamField path="disableHTTP2" type="boolean" default="false">
+  Use HTTP/1.1 instead of HTTP/2 for upstream requests. This can raise throughput when several parallel connections do better than one multiplexed HTTP/2 connection. To open more than three parallel connections to an HTTP/2 upstream, raise `reqConcurrent` and set `disableHTTP2`.
+</ParamField>
+
+<ParamField path="maxIdleConnsPerHost" type="integer">
+  Maximum idle connections kept per upstream host. It must be greater than zero. If unset, Go's default of `2` applies. When `disableHTTP2` is `true`, the default becomes the effective `reqConcurrent`.
+</ParamField>
+
+<ParamField path="onDemandInBackground" type="boolean" default="false">
+  On a local manifest miss, return `404` and fill the image in the background. See [On-demand sync in the background](#on-demand-sync-in-the-background).
+</ParamField>
+
+<ParamField path="stream" type="boolean" default="false">
+  Serve an on-demand image to the client while it downloads. See [Streaming on-demand sync](#streaming-on-demand-sync).
+</ParamField>
+
+<ParamField path="maxConcurrentStreams" type="integer" default="32">
+  The maximum number of distinct blobs that stream at once. All streaming registries share this limit, so they must use the same value.
+</ParamField>
+
+## Select platforms for periodic sync
+
+Use `platforms` to make a sparse local copy of a multi-architecture image. The registry-level list is the default, and a content entry can override it:
+
+```json
+{
+  "urls": ["https://registry.example.com"],
+  "pollInterval": "6h",
+  "platforms": ["linux/amd64", "linux/arm64"],
+  "content": [{
+    "prefix": "edge/**",
+    "platforms": ["linux/arm64/v8"]
+  }]
+}
+```
+
+The index keeps its upstream digest even when only some child manifests are stored. Storage validation, garbage collection, scanning, and scrub accept children that were deliberately left out. On-demand sync stays demand-driven and ignores both platform lists.
+
+An entry can be `os/arch`, `os/arch/variant`, or a bare architecture such as `amd64`. Include `""` in a non-empty list to keep descriptors that declare no platform, such as attestation-style entries. Added in v2.1.22.
+
+## On-demand sync in the background
+
+Set `onDemand` and `onDemandInBackground` to return immediately when a manifest isn't local, and to fill it in the background:
+
+```json
+{
+  "urls": ["https://registry-1.docker.io"],
+  "onDemand": true,
+  "onDemandInBackground": true
+}
+```
+
+The first manifest request gets a real `404`. Later requests succeed once the background sync completes. A blob miss alone doesn't start a background sync.
+
+<Warning>
+  Use this mode only when clients can fall back to another registry while zot fills its storage. Don't use it if zot is the client's only registry. It requires `onDemand` and can't be combined with `manifestCheckInterval` or `stream`.
+</Warning>
+
+Hard upstream failures during on-demand sync return `503`, and a genuine upstream miss returns `404`. On-demand sync reuses layers that are already stored locally before it fetches them again.
+
+## Control on-demand upstream requests
+
+This example revalidates a cached tag at most every five minutes, limits each upstream host to 20 concurrent requests and 100 requests per second, and uses a larger HTTP/1.1 connection pool for high-throughput transfers:
+
+```json
+{
+  "extensions": {
+    "sync": {
+      "registries": [
+        {
+          "urls": ["https://registry.example.com"],
+          "onDemand": true,
+          "manifestCheckInterval": "5m",
+          "reqConcurrent": 20,
+          "reqPerSec": 100,
+          "disableHTTP2": true,
+          "maxIdleConnsPerHost": 20
+        }
+      ]
+    }
+  }
+}
+```
+
+When concurrent clients request the same uncached image, zot combines their requests into one sync operation.
+
+## Streaming on-demand sync
+
+<Note>
+  Streaming sync is in the zot source after v2.1.22 and isn't described in the v2.1.22 release notes. Confirm that your release includes it before you rely on it.
+</Note>
+
+By default, a manifest miss blocks until zot has copied every blob and committed the image. With `stream: true`, zot returns the upstream manifest right away, syncs the image in the background, and serves the client's blob requests from the in-flight downloads. All concurrent clients share one upstream copy.
+
+```json
+{
+  "urls": ["https://registry-1.docker.io"],
+  "onDemand": true,
+  "stream": true,
+  "maxConcurrentStreams": 32
+}
+```
+
+Streaming sends bytes to a client before zot verifies their digest, so it only accepts authenticated upstreams. zot rejects the configuration unless all of these are true:
+
+- `onDemand` is `true`.
+- Every URL is `https://host[:port]`, and `tlsVerify` isn't `false`.
+- `onDemandInBackground`, `maxRetries`, and `retryDelay` aren't set.
+- `maxConcurrentStreams`, if set, is greater than zero and equal across all streaming registries.
+
+If a repository matches both `stream` and `onDemandInBackground` entries, `onDemandInBackground` wins. Size the staging disk for about the total size of the images being synced at once. For remote storage, set `extensions.sync.downloadDir`.
+
+## Authenticate to an upstream
+
+Without credentials, zot connects anonymously. To authenticate, use a credentials file or a credential helper. A registry that sets `credentialHelper` doesn't use `credentialsFile`.
+
+<Tabs>
+  <Tab title="Credentials file">
+    Set `extensions.sync.credentialsFile` to a JSON file as shown in [Sync settings](#sync-settings).
+  </Tab>
+  <Tab title="AWS ECR">
+    The `ecr` helper gets a short-lived token from the AWS ECR authorization service.
+
+    ```json
+    "extensions": {
+      "sync": {
+        "registries": [{
+          "urls": ["https://<account-id>.dkr.ecr.<region>.amazonaws.com"],
+          "onDemand": true,
+          "maxRetries": 5,
+          "retryDelay": "2m",
+          "credentialHelper": "ecr"
+        }]
+      }
+    }
+    ```
+
+    If zot also uses remote storage such as S3, add `"downloadDir"` to the `sync` block.
+  </Tab>
+  <Tab title="Google">
+    The `gcp` helper gets a read-only access token from [Google Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials). It supports GCE and GKE metadata credentials, `GOOGLE_APPLICATION_CREDENTIALS`, workload identity federation files, and gcloud user credentials. The principal needs permission to read the upstream, such as `roles/artifactregistry.reader`.
+
+    ```json
+    "extensions": {
+      "sync": {
+        "registries": [{
+          "urls": ["https://<region>-docker.pkg.dev"],
+          "onDemand": true,
+          "credentialHelper": "gcp"
+        }]
+      }
+    }
+    ```
+
+    The helper also works with Google Container Registry hostnames that accept Google access tokens. It requests the `cloud-platform.read-only` scope and refreshes the token automatically.
+  </Tab>
+  <Tab title="OAuth2">
+    The `oauth2` helper exchanges an assertion for a short-lived registry access token and refreshes it before it expires. Configure exactly one assertion source: `assertionFile` for an externally issued token that can rotate on disk, or `signingFile` so zot mints a fresh single-use JWT for each exchange.
+
+    This RFC 8693 example exchanges a rotating workload identity token with a security token service:
+
+    ```json
+    "extensions": {
+      "sync": {
+        "registries": [{
+          "urls": ["https://registry.example.com"],
+          "onDemand": true,
+          "credentialHelper": "oauth2",
+          "oauth2CredentialHelper": {
+            "tokenURL": "https://sts.example.com/v1/token",
+            "assertionFile": "/run/secrets/subject-token",
+            "grantType": "urn:ietf:params:oauth:grant-type:token-exchange",
+            "audience": "//sts.example.com/pools/example/providers/workload",
+            "subjectTokenType": "urn:ietf:params:oauth:token-type:jwt",
+            "requestedTokenType": "urn:ietf:params:oauth:token-type:access_token",
+            "username": "oauth2accesstoken"
+          }
+        }]
+      }
+    }
+    ```
+
+    <ParamField path="oauth2CredentialHelper.tokenURL" type="string" required>
+      The OAuth2 token endpoint.
+    </ParamField>
+    <ParamField path="oauth2CredentialHelper.assertionFile" type="string">
+      Path to a pre-signed assertion. Required unless `signingFile` is set, and mutually exclusive with it. zot re-reads it on every refresh.
+    </ParamField>
+    <ParamField path="oauth2CredentialHelper.signingFile" type="string">
+      Path to a JSON signing configuration that lets zot mint assertions. Required unless `assertionFile` is set, and mutually exclusive with it.
+    </ParamField>
+    <ParamField path="oauth2CredentialHelper.grantType" type="string" default="client_credentials">
+      The grant type. It also supports `urn:ietf:params:oauth:grant-type:jwt-bearer` and `urn:ietf:params:oauth:grant-type:token-exchange`.
+    </ParamField>
+    <ParamField path="oauth2CredentialHelper.clientID" type="string">
+      Optional OAuth2 client identifier.
+    </ParamField>
+    <ParamField path="oauth2CredentialHelper.clientSecretFile" type="string">
+      Optional path to a file that contains the OAuth2 client secret.
+    </ParamField>
+    <ParamField path="oauth2CredentialHelper.scopes" type="array of string">
+      Optional OAuth2 scopes, sent as one space-separated `scope` value.
+    </ParamField>
+    <ParamField path="oauth2CredentialHelper.username" type="string" default="<token>">
+      The registry username paired with the access token.
+    </ParamField>
+    <ParamField path="oauth2CredentialHelper.audience" type="string">
+      Required for the RFC 8693 token exchange. Rejected for other grant types.
+    </ParamField>
+    <ParamField path="oauth2CredentialHelper.subjectTokenType" type="string" default="urn:ietf:params:oauth:token-type:jwt">
+      The RFC 8693 subject token type, as an absolute URI.
+    </ParamField>
+    <ParamField path="oauth2CredentialHelper.requestedTokenType" type="string" default="urn:ietf:params:oauth:token-type:access_token">
+      The RFC 8693 requested token type, as an absolute URI.
+    </ParamField>
+
+    A `signingFile` contains `privateKeyFile` (a PEM key) and `algorithm` (for example `RS256` or `ES256`), plus optional `keyId`, `issuer`, `subject`, and `audience`. `issuer` and `subject` default to `clientID`, and `audience` defaults to `tokenURL`.
+  </Tab>
+</Tabs>
+
+## Examples
+
+<AccordionGroup>
+  <Accordion title="Polled mirroring of multiple repositories" defaultOpen>
+    If the upstream can return Docker schema 2 content, also set `http.compat: ["docker2s2"]` in the full configuration.
+
+    ```json
+    "sync": {
+      "enable": true,
+      "credentialsFile": "/etc/zot/sync-credentials.json",
+      "registries": [
+        {
+          "urls": ["https://registry1:5000"],
+          "onDemand": false,
+          "pollInterval": "6h",
+          "tlsVerify": true,
+          "certDir": "/etc/zot/certs",
+          "maxRetries": 3,
+          "retryDelay": "5m",
+          "onlySigned": true,
+          "content": [
+            {
+              "prefix": "/repo1/repo",
+              "tags": {
+                "regex": "4.*",
+                "semver": true,
+                "excludeRegex": ".*-(amd64|arm64)$"
+              }
+            },
+            {
+              "prefix": "/repo2/repo",
+              "destination": "/repo2",
+              "stripPrefix": true
+            },
+            {
+              "prefix": "/repo3/repo"
+            }
+          ]
+        }
+      ]
+    }
+    ```
+
+    This configuration:
+
+    - Syncs only signed images (notation and cosign).
+    - Secures the connection with certificates in `certDir`.
+    - Polls the upstream every 6 hours, with no on-demand sync.
+    - From `/repo1/repo`, pulls tags that begin with `4.`, are valid semver, and don't end in `-amd64` or `-arm64`. Images are stored in `/repo1/repo`.
+    - From `/repo2/repo`, pulls all tags. With `stripPrefix`, images are stored in `/repo2`, so `upstream/repo2/repo:v1` becomes `local/repo2:v1`.
+    - From `/repo3/repo`, pulls all tags into `/repo3/repo`.
+  </Accordion>
+  <Accordion title="On-demand mirroring of multiple registries">
+    ```json
+    {
+      "distSpecVersion": "1.1.1",
+      "storage": { "rootDirectory": "/tmp/zot", "gc": true },
+      "http": { "address": "0.0.0.0", "port": "8080", "compat": ["docker2s2"] },
+      "log": { "level": "debug" },
+      "extensions": {
+        "sync": {
+          "enable": true,
+          "registries": [
+            {
+              "urls": ["https://registry.k8s.io"],
+              "content": [{ "prefix": "**", "destination": "/k8s-images" }],
+              "onDemand": true,
+              "tlsVerify": true,
+              "syncTimeout": "10m"
+            },
+            {
+              "urls": ["https://index.docker.io"],
+              "content": [{ "prefix": "**", "destination": "/docker-images" }],
+              "onDemand": true,
+              "tlsVerify": true
+            }
+          ]
+        }
+      }
+    }
+    ```
+
+    With this configuration:
+
+    1. `skopeo copy --src-tls-verify=false docker://localhost:8080/docker-images/alpine <dest>` makes zot pull `docker.io/library/alpine:latest` and store it as `localhost:8080/docker-images/alpine:latest` before it serves the client.
+    2. `skopeo copy --src-tls-verify=false docker://localhost:8080/k8s-images/kube-proxy:v1.19.2 <dest>` makes zot pull `registry.k8s.io/kube-proxy:v1.19.2` and store it as `localhost:8080/k8s-images/kube-proxy:v1.19.2`.
+
+    Then `curl http://localhost:8080/v2/_catalog` lists the local repositories:
+
+    ```json
+    {
+      "repositories": [
+        "docker-images/alpine",
+        "k8s-images/kube-proxy"
+      ]
+    }
+    ```
+  </Accordion>
+  <Accordion title="Mixed modes across registries">
+    ```json
+    "sync": {
+      "enable": true,
+      "credentialsFile": "/etc/zot/sync-credentials.json",
+      "registries": [
+        {
+          "urls": ["https://registry1:5000"],
+          "onDemand": false,
+          "pollInterval": "6h",
+          "tlsVerify": true,
+          "certDir": "/etc/zot/certs",
+          "maxRetries": 3,
+          "retryDelay": "5m",
+          "onlySigned": true,
+          "content": [
+            {
+              "prefix": "/repo1/repo",
+              "tags": { "regex": "4.*", "semver": true }
+            },
+            {
+              "prefix": "/repo1/repo",
+              "destination": "/repo",
+              "stripPrefix": true
+            },
+            { "prefix": "/repo2/repo" }
+          ]
+        },
+        {
+          "urls": ["https://registry2:5000", "https://registry3:5000"],
+          "pollInterval": "12h",
+          "tlsVerify": false,
+          "onDemand": false,
+          "content": [{ "prefix": "/repo2", "tags": { "semver": true } }]
+        },
+        {
+          "urls": ["https://index.docker.io"],
+          "onDemand": true,
+          "tlsVerify": true,
+          "maxRetries": 6,
+          "retryDelay": "5m"
+        }
+      ]
+    }
+    ```
+  </Accordion>
+  <Accordion title="Storage subpaths">
+    On-demand content can land in a storage subpath. Here, everything under the `/kube-proxy` destination goes to its own storage root.
+
+    ```json
+    {
+      "distSpecVersion": "1.1.1",
+      "storage": {
+        "rootDirectory": "/tmp/zot",
+        "gc": true,
+        "subPaths": {
+          "/kube-proxy": {
+            "rootDirectory": "/tmp/kube-proxy",
+            "dedupe": true,
+            "gc": true
+          }
+        }
+      },
+      "http": { "address": "0.0.0.0", "port": "8080", "compat": ["docker2s2"] },
+      "log": { "level": "debug" },
+      "extensions": {
+        "sync": {
+          "enable": true,
+          "registries": [
+            {
+              "urls": ["https://registry.k8s.io"],
+              "content": [{ "destination": "/kube-proxy", "prefix": "**" }],
+              "onDemand": true,
+              "tlsVerify": true,
+              "maxRetries": 2,
+              "retryDelay": "5m"
+            }
+          ]
+        }
+      }
+    }
+    ```
+
+    A request for `docker://localhost:8080/kube-proxy/kube-proxy:v1.19.2` pulls `registry.k8s.io/kube-proxy:v1.19.2` into the registry. On disk it's at `/tmp/kube-proxy/kube-proxy/kube-proxy/`, which is the subpath's `rootDirectory`, then the sync `destination`, then the repository name.
+  </Accordion>
+</AccordionGroup>
+
+## Migrate or update a registry
+
+Because sync can copy a whole registry, it's a convenient way to migrate or upgrade one:
+
+- **Move an existing registry** (zot or not) to a new location. If the source is OCI-compliant for pulls, mirror it into a new zot registry, delete the old one, and reroute traffic.
+- **Upgrade or downgrade zot.** To minimize downtime, or to avoid incompatibilities between releases that prevent an in-place update, bring up a new zot at the version you want and migrate from the existing registry.
+
+To copy everything, set a polling interval on the new registry and use `**` as the prefix:
+
+```json
+{
+  "urls": ["https://registry1:5000"],
+  "pollInterval": "12h",
+  "onDemand": true,
+  "content": [{ "prefix": "**" }]
+}
+```
+
+## Sync in a cluster
+
+[Scale-out clustering](/operations/clustering/scale-out) is compatible with sync, whether on demand or periodic. Zot hashes each repository name to one instance, and only that instance syncs the repository.
+
+## Sync and retention
+
+If a retention policy covers repositories that sync fills, retention can remove images that sync is bringing in. zot logs a warning at startup when it finds an overlap. See [Retention and garbage collection](/operations/retention-gc#retention-and-sync).
+
+## Related
+
+- [High availability](/operations/clustering/high-availability) uses sync between instances.
+- [Docker client](/clients/docker#use-zot-as-a-docker-pull-through-cache) shows how to point Docker at a zot cache.
+- [containerd](/clients/containerd) mirrors through zot.
+- [Background tasks](/configuration/background-tasks) explains how the scheduler runs periodic sync.

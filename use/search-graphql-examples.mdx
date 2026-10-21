@@ -1,0 +1,860 @@
+---
+title: "GraphQL search examples"
+description: "Example GraphQL queries for searching images, repositories, CVEs, and referrers in zot."
+icon: "code"
+---
+
+Each example shows the GraphQL query and a trimmed response. Responses use real field names from the zot schema, and `...` marks content that's cut for length.
+
+<Note>
+  To send a query, see [Search with GraphQL](/use/search-graphql#send-a-query). The queries request many fields. You can request a subset and omit what you don't need.
+</Note>
+
+To run any query from a shell, wrap it in a JSON body:
+
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  --data '{ "query": "{ ImageList(repo: \"ubuntu\") { Results { Tag Digest } } }" }' \
+  http://localhost:5000/v2/_zot/ext/search
+```
+
+## Find images
+
+<AccordionGroup>
+  <Accordion title="List all images in a repository" defaultOpen>
+    Use `repo: ""` to list images from every repository.
+
+    ```graphql
+    {
+      ImageList(repo: "ubuntu") {
+        Results {
+          Tag
+          Digest
+          LastUpdated
+          Size
+        }
+      }
+    }
+    ```
+
+    ```json
+    {
+      "data": {
+        "ImageList": {
+          "Results": [
+            {
+              "Tag": "jammy",
+              "Digest": "sha256:f96fcb040c7ee00c037c758cf0ab40638e6ee89b03a9d639178fcbd0e7f96d27",
+              "LastUpdated": "2022-10-14T15:29:18.0325322Z",
+              "Size": "30472739"
+            },
+            {
+              "Tag": "latest",
+              "Digest": "sha256:9bc6d811431613bf2fd8bf3565b319af9998fc5c46304022b647c63e1165657c",
+              "LastUpdated": "2022-10-14T15:26:59.6707939Z",
+              "Size": "30472740"
+            }
+          ]
+        }
+      }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Search by name, or by repository and tag">
+    A plain string searches repository names. A string with a colon searches tags.
+
+    ```graphql
+    {
+      GlobalSearch(query: "ubuntu:latest") {
+        Page {
+          ItemCount
+          TotalCount
+        }
+        Images {
+          RepoName
+          Tag
+          LastUpdated
+          Manifests {
+            Digest
+            Layers {
+              Size
+              Digest
+            }
+          }
+        }
+      }
+    }
+    ```
+
+    ```json
+    {
+      "data": {
+        "GlobalSearch": {
+          "Page": {
+            "ItemCount": 1,
+            "TotalCount": 1
+          },
+          "Images": [
+            {
+              "RepoName": "ubuntu",
+              "Tag": "latest",
+              "LastUpdated": "2022-10-14T15:26:59.6707939Z",
+              "Manifests": [
+                {
+                  "Digest": "sha256:9bc6d811431613bf2fd8bf3565b319af9998fc5c46304022b647c63e1165657c",
+                  "Layers": [
+                    {
+                      "Size": "30428928",
+                      "Digest": "sha256:cf92e523b49ea3d1fae59f5f082437a5f96c244fda6697995920142ff31d59cf"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+    ```
+
+    To list repositories instead, request `Repos`. An empty query matches every repository:
+
+    ```graphql
+    {
+      GlobalSearch(query: "") {
+        Repos {
+          Name
+        }
+      }
+    }
+    ```
+
+    ```json
+    {
+      "data": {
+        "GlobalSearch": {
+          "Repos": [
+            { "Name": "centos" },
+            { "Name": "ubuntu" }
+          ]
+        }
+      }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Find images that contain a digest">
+    Matches a manifest, config, or layer digest.
+
+    ```graphql
+    {
+      ImageListForDigest(
+        id: "79eae04a0e32878fef3f8c5f901c32f6704c4a80b7f3fd9d89629e15867acfff"
+      ) {
+        Results {
+          RepoName
+          Tag
+          Title
+        }
+      }
+    }
+    ```
+
+    ```json
+    {
+      "data": {
+        "ImageListForDigest": {
+          "Results": [
+            {
+              "RepoName": "ubuntu",
+              "Tag": "kinetic-20220922",
+              "Title": "ubuntu"
+            }
+          ]
+        }
+      }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Find images built on or from an image">
+    `DerivedImageList` returns images that use the given image as a base. `BaseImageList` returns the images it depends on.
+
+    <CodeGroup>
+      ```graphql DerivedImageList
+      {
+        DerivedImageList(image: "ubuntu:latest", requestedPage: {offset: 0, limit: 10}) {
+          Page {
+            TotalCount
+            ItemCount
+          }
+          Results {
+            RepoName
+            Tag
+            LastUpdated
+          }
+        }
+      }
+      ```
+
+      ```graphql BaseImageList
+      {
+        BaseImageList(image: "mariadb:latest", requestedPage: {offset: 0, limit: 10}) {
+          Page {
+            TotalCount
+            ItemCount
+          }
+          Results {
+            RepoName
+            Tag
+            LastUpdated
+          }
+        }
+      }
+      ```
+    </CodeGroup>
+
+    Response for `BaseImageList`:
+
+    ```json
+    {
+      "data": {
+        "BaseImageList": {
+          "Page": {
+            "TotalCount": 4,
+            "ItemCount": 4
+          },
+          "Results": [
+            {
+              "RepoName": "ubuntu",
+              "Tag": "jammy",
+              "LastUpdated": "2022-10-14T18:29:18.0325322+03:00"
+            },
+            {
+              "RepoName": "ubuntu",
+              "Tag": "latest",
+              "LastUpdated": "2022-10-14T18:26:59.6707939+03:00"
+            }
+          ]
+        }
+      }
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Browse repositories
+
+<AccordionGroup>
+  <Accordion title="Newest image of every repository">
+    "Newest" means the most recently created image, not the one tagged `latest`.
+
+    ```graphql
+    {
+      RepoListWithNewestImage(requestedPage: {limit: 2, offset: 0, sortBy: ALPHABETIC_ASC}) {
+        Page {
+          TotalCount
+          ItemCount
+        }
+        Results {
+          Name
+          LastUpdated
+          Size
+          Platforms {
+            Os
+            Arch
+          }
+          NewestImage {
+            Digest
+            Tag
+          }
+        }
+      }
+    }
+    ```
+
+    ```json
+    {
+      "data": {
+        "RepoListWithNewestImage": {
+          "Page": {
+            "TotalCount": 30,
+            "ItemCount": 2
+          },
+          "Results": [
+            {
+              "Name": "mariadb",
+              "LastUpdated": "2022-10-18T14:56:33.1993083+03:00",
+              "Size": "124116964",
+              "Platforms": [
+                { "Os": "linux", "Arch": "amd64" }
+              ],
+              "NewestImage": {
+                "Digest": "sha256:49a299f5c4b1af5bc2aa6cf8e50ab5bad85db4d0095745369acfc1934ece99d0",
+                "Tag": "latest"
+              }
+            },
+            {
+              "Name": "tomcat",
+              "LastUpdated": "2022-10-18T14:55:13.8303866+03:00",
+              "Size": "311658063",
+              "Platforms": [
+                { "Os": "linux", "Arch": "amd64" }
+              ],
+              "NewestImage": {
+                "Digest": "sha256:bbc5a3912b568fbfb5912beaf25054f1f407c32a53acae29f19ad97485731a78",
+                "Tag": "jre17"
+              }
+            }
+          ]
+        }
+      }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Repository summary with all its images">
+    ```graphql
+    {
+      ExpandedRepoInfo(repo: "ubuntu") {
+        Images {
+          Tag
+          Digest
+        }
+        Summary {
+          LastUpdated
+          Size
+          NewestImage {
+            Tag
+            LastUpdated
+            Digest
+          }
+        }
+      }
+    }
+    ```
+
+    ```json
+    {
+      "data": {
+        "ExpandedRepoInfo": {
+          "Images": [
+            {
+              "Tag": "jammy",
+              "Digest": "sha256:f96fcb040c7ee00c037c758cf0ab40638e6ee89b03a9d639178fcbd0e7f96d27"
+            },
+            {
+              "Tag": "latest",
+              "Digest": "sha256:9bc6d811431613bf2fd8bf3565b319af9998fc5c46304022b647c63e1165657c"
+            }
+          ],
+          "Summary": {
+            "LastUpdated": "2022-10-14T15:29:18.0325322Z",
+            "Size": "58146896",
+            "NewestImage": {
+              "Tag": "jammy",
+              "LastUpdated": "2022-10-14T15:29:18.0325322Z",
+              "Digest": "sha256:f96fcb040c7ee00c037c758cf0ab40638e6ee89b03a9d639178fcbd0e7f96d27"
+            }
+          }
+        }
+      }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Starred and bookmarked repositories">
+    These return repositories the signed-in user starred or bookmarked, so they need an authenticated request. They take the same `requestedPage` argument as other list queries.
+
+    <CodeGroup>
+      ```graphql StarredRepos
+      {
+        StarredRepos(requestedPage: {limit: 10, offset: 0}) {
+          Page {
+            TotalCount
+            ItemCount
+          }
+          Results {
+            Name
+            StarCount
+            IsStarred
+          }
+        }
+      }
+      ```
+
+      ```graphql BookmarkedRepos
+      {
+        BookmarkedRepos(requestedPage: {limit: 10, offset: 0}) {
+          Page {
+            TotalCount
+            ItemCount
+          }
+          Results {
+            Name
+            IsBookmarked
+          }
+        }
+      }
+      ```
+    </CodeGroup>
+  </Accordion>
+</AccordionGroup>
+
+## Inspect an image
+
+<AccordionGroup>
+  <Accordion title="Get the details of one image" defaultOpen>
+    `Image` returns an `ImageSummary` for a `repository:tag` reference. For a multi-architecture index, `Manifests` has one entry for each platform.
+
+    ```graphql
+    {
+      Image(image: "alpine:latest") {
+        RepoName
+        Tag
+        Digest
+        MediaType
+        ArtifactType
+        Size
+        DownloadCount
+        LastPullTimestamp
+        PushTimestamp
+        TaggedTimestamp
+        LastUpdated
+        Description
+        Title
+        Documentation
+        Licenses
+        Source
+        Vendor
+        Authors
+        IsSigned
+        IsDeletable
+        Vulnerabilities {
+          MaxSeverity
+          Count
+          UnknownCount
+          LowCount
+          MediumCount
+          HighCount
+          CriticalCount
+        }
+        SignatureInfo {
+          Tool
+          IsTrusted
+          Author
+        }
+        Referrers {
+          MediaType
+          ArtifactType
+          Size
+          Digest
+          Annotations {
+            Key
+            Value
+          }
+        }
+        Manifests {
+          Digest
+          ConfigDigest
+          LastUpdated
+          Size
+          IsSigned
+          DownloadCount
+          ArtifactType
+          Platform {
+            Os
+            Arch
+          }
+          Vulnerabilities {
+            MaxSeverity
+            Count
+          }
+          Layers {
+            Size
+            Digest
+          }
+          History {
+            Layer {
+              Size
+              Digest
+            }
+            HistoryDescription {
+              Created
+              CreatedBy
+              Author
+              Comment
+              EmptyLayer
+            }
+          }
+        }
+      }
+    }
+    ```
+
+    ```json
+    {
+      "data": {
+        "Image": {
+          "RepoName": "alpine",
+          "Tag": "latest",
+          "Digest": "sha256:85f2b723e106c34644cd5851d7e81ee87da98ac54672b29947c052a45d31dc2f",
+          "MediaType": "application/vnd.oci.image.manifest.v1+json",
+          "ArtifactType": "application/vnd.oci.image.config.v1+json",
+          "Size": "3804055",
+          "DownloadCount": 0,
+          "LastPullTimestamp": "1970-01-01T00:00:00Z",
+          "PushTimestamp": "2026-02-02T14:42:05.849482664Z",
+          "TaggedTimestamp": "2026-02-02T14:42:05.849482232Z",
+          "LastUpdated": "2025-10-08T11:04:56Z",
+          "IsSigned": false,
+          "IsDeletable": null,
+          "Vulnerabilities": {
+            "MaxSeverity": "UNKNOWN",
+            "Count": 14,
+            "UnknownCount": 14,
+            "LowCount": 0,
+            "MediumCount": 0,
+            "HighCount": 0,
+            "CriticalCount": 0
+          },
+          "SignatureInfo": [],
+          "Referrers": [],
+          "Manifests": [
+            {
+              "Digest": "sha256:85f2b723e106c34644cd5851d7e81ee87da98ac54672b29947c052a45d31dc2f",
+              "ConfigDigest": "sha256:706db57fb2063f39f69632c5b5c9c439633fda35110e65587c5d85553fd1cc38",
+              "LastUpdated": "2025-10-08T11:04:56Z",
+              "Size": "3804055",
+              "IsSigned": false,
+              "DownloadCount": 0,
+              "ArtifactType": "application/vnd.oci.image.config.v1+json",
+              "Platform": {
+                "Os": "linux",
+                "Arch": "amd64"
+              },
+              "Vulnerabilities": {
+                "MaxSeverity": "UNKNOWN",
+                "Count": 14
+              },
+              "Layers": [
+                {
+                  "Size": "3802452",
+                  "Digest": "sha256:2d35ebdb57d9971fea0cac1582aa78935adf8058b2cc32db163c98822e5dfa1b"
+                }
+              ],
+              "History": [
+                {
+                  "Layer": {
+                    "Size": "3802452",
+                    "Digest": "sha256:2d35ebdb57d9971fea0cac1582aa78935adf8058b2cc32db163c98822e5dfa1b"
+                  },
+                  "HistoryDescription": {
+                    "Created": "2025-10-08T11:04:56Z",
+                    "CreatedBy": "ADD alpine-minirootfs-3.22.2-x86_64.tar.gz / # buildkit",
+                    "Author": "",
+                    "Comment": "buildkit.dockerfile.v0",
+                    "EmptyLayer": false
+                  }
+                },
+                {
+                  "Layer": null,
+                  "HistoryDescription": {
+                    "Created": "2025-10-08T11:04:56Z",
+                    "CreatedBy": "CMD [\"/bin/sh\"]",
+                    "Author": "",
+                    "Comment": "buildkit.dockerfile.v0",
+                    "EmptyLayer": true
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="What the Image fields mean">
+    **Identity**
+
+    - `RepoName`, `Tag`, `Digest`: the resolved reference. `Digest` is the digest of the manifest or index.
+    - `MediaType`: the media type of that object, for example a manifest or an index.
+    - `ArtifactType`: for a manifest, the `artifactType` field if present, otherwise the config media type. For an index, the index `artifactType`.
+
+    **Size and popularity**
+
+    - `Size`: total size in bytes, returned as a string. It covers the manifest, config, and layers.
+    - `DownloadCount`: how many times zot recorded a pull of this image's manifest.
+
+    **Timestamps**
+
+    - `PushTimestamp`: when the image was pushed to the registry.
+    - `TaggedTimestamp`: when the tag was applied. If that isn't recorded, it falls back to the push time.
+    - `LastPullTimestamp`: the last pull. For an image that was never pulled, the value is a default timestamp. The sample shows the Unix epoch.
+    - `LastUpdated`: when the image was last modified, from the config or the most recently updated layer.
+
+    **Descriptive metadata**
+
+    `Description`, `Title`, `Documentation`, `Licenses`, `Source`, `Vendor`, and `Authors` come from image annotations when present. `Labels` is currently unused.
+
+    **Security and policy**
+
+    - `IsSigned` and `SignatureInfo { Tool IsTrusted Author }`: signature status. See [Verify image signatures](/security/signatures).
+    - `Vulnerabilities`: counts by severity. These are filled only when [CVE scanning](/security/cve-scanning) is enabled and results are available.
+    - `IsDeletable`: whether the current user can delete this tag. It can be `null` when delete permission isn't evaluated.
+
+    **Referrers**
+
+    `Referrers` lists artifacts that point at the image, such as signatures and SBOMs. Each has `MediaType`, `ArtifactType`, `Size`, `Digest`, and `Annotations`.
+
+    **Manifests**
+
+    One entry per platform for an index, or a single entry for a single-architecture image. It repeats `IsSigned`, `SignatureInfo`, `Vulnerabilities`, `DownloadCount`, and `Referrers` for that manifest, and adds `ConfigDigest`, `Platform { Os Arch }`, `Layers { Size Digest }`, and `History`. A history entry with `EmptyLayer: true` didn't change the filesystem.
+  </Accordion>
+
+  <Accordion title="Find referrers of an image">
+    Returns artifacts that have the given digest as their `subject`. The `type` argument filters by artifact type.
+
+    ```graphql
+    {
+      Referrers(
+        repo: "golang"
+        digest: "sha256:fed08b0eaea00aab17f82ecbb78675919d216c72eea985581758191f694aeaf7"
+        type: "application/vnd.example.icecream.v1"
+      ) {
+        MediaType
+        ArtifactType
+        Digest
+        Annotations {
+          Key
+          Value
+        }
+      }
+    }
+    ```
+
+    ```json
+    {
+      "data": {
+        "Referrers": [
+          {
+            "MediaType": "application/vnd.oci.artifact.manifest.v1+json",
+            "ArtifactType": "application/vnd.example.icecream.v1",
+            "Digest": "sha256:be7a3d01c35a2cf53c502e9dc50cdf36b15d9361c81c63bf319f1d5cbe44ab7c",
+            "Annotations": [
+              { "Key": "format", "Value": "oci" },
+              { "Key": "demo", "Value": "true" }
+            ]
+          }
+        ]
+      }
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Search by vulnerability
+
+These queries need [CVE scanning](/security/cve-scanning) to be enabled.
+
+<AccordionGroup>
+  <Accordion title="List the CVEs of an image" defaultOpen>
+    The example sorts by severity and asks for the second CVE only. You can also filter with `severity`, `searchedCVE`, and `excludedCVE`.
+
+    ```graphql
+    {
+      CVEListForImage(
+        image: "alpine:3.17"
+        requestedPage: {limit: 1, offset: 1, sortBy: SEVERITY}
+      ) {
+        Tag
+        Page {
+          TotalCount
+          ItemCount
+        }
+        CVEList {
+          Id
+          Title
+          Description
+          Severity
+          PackageList {
+            Name
+            InstalledVersion
+            FixedVersion
+          }
+        }
+      }
+    }
+    ```
+
+    ```json
+    {
+      "data": {
+        "CVEListForImage": {
+          "Tag": "3.17",
+          "Page": {
+            "TotalCount": 9,
+            "ItemCount": 1
+          },
+          "CVEList": [
+            {
+              "Id": "CVE-2023-5363",
+              "Title": "openssl: Incorrect cipher key and IV length processing",
+              "Description": "Issue summary: A bug has been identified in the processing of key and initialisation vector (IV) lengths. ...",
+              "Severity": "HIGH",
+              "PackageList": [
+                {
+                  "Name": "libcrypto3",
+                  "InstalledVersion": "3.0.8-r0",
+                  "FixedVersion": "3.0.12-r0"
+                },
+                {
+                  "Name": "libssl3",
+                  "InstalledVersion": "3.0.8-r0",
+                  "FixedVersion": "3.0.12-r0"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+    ```
+
+    `Severity` is one of `UNKNOWN`, `LOW`, `MEDIUM`, `HIGH`, or `CRITICAL`.
+  </Accordion>
+
+  <Accordion title="Find images affected by a CVE">
+    ```graphql
+    {
+      ImageListForCVE(id: "CVE-2023-0464") {
+        Results {
+          RepoName
+          Tag
+          Digest
+          LastUpdated
+          IsSigned
+          Size
+          Manifests {
+            Digest
+            ConfigDigest
+            Platform {
+              Os
+              Arch
+            }
+          }
+        }
+      }
+    }
+    ```
+
+    ```json
+    {
+      "data": {
+        "ImageListForCVE": {
+          "Results": [
+            {
+              "RepoName": "alpine",
+              "Tag": "3.17",
+              "Digest": "sha256:75bfe77c8d5a76b4421cfcebbd62a28ae70d10147578d0cda45820e99b0ef1d8",
+              "LastUpdated": "2023-02-11T04:46:42.558343068Z",
+              "IsSigned": true,
+              "Size": "3375436",
+              "Manifests": [
+                {
+                  "Digest": "sha256:75bfe77c8d5a76b4421cfcebbd62a28ae70d10147578d0cda45820e99b0ef1d8",
+                  "ConfigDigest": "sha256:6a2bcc1c7b4c9207f791a4512d7f2fa8fc2daeae58dbc51cb2797b05415f082a",
+                  "Platform": {
+                    "Os": "linux",
+                    "Arch": "amd64"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Find images in a repository that are not affected by a CVE">
+    Pass the repository name in `image`.
+
+    ```graphql
+    {
+      ImageListWithCVEFixed(id: "CVE-2023-0464", image: "ubuntu") {
+        Results {
+          RepoName
+          Tag
+          Digest
+          LastUpdated
+        }
+      }
+    }
+    ```
+
+    ```json
+    {
+      "data": {
+        "ImageListWithCVEFixed": {
+          "Results": [
+            {
+              "RepoName": "ubuntu",
+              "Tag": "kinetic",
+              "Digest": "sha256:1ac35e499e330f6520e80e91b29a55ff298077211f5ed66aff5cb357cca4a28f",
+              "LastUpdated": "2022-10-14T15:28:55.0263968Z"
+            }
+          ]
+        }
+      }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Compare the CVEs of two images">
+    `CVEDiffListForImages` returns CVEs that are in the `minuend` image but not in the `subtrahend` image. It's useful for checking that a new image fixes what the old one had.
+
+    ```graphql
+    {
+      CVEDiffListForImages(
+        minuend: {Repo: "alpine", Tag: "3.17"}
+        subtrahend: {Repo: "alpine", Tag: "3.18"}
+        requestedPage: {limit: 10, offset: 0}
+      ) {
+        Minuend {
+          Repo
+          Tag
+        }
+        Subtrahend {
+          Repo
+          Tag
+        }
+        Summary {
+          Count
+          MaxSeverity
+        }
+        Page {
+          TotalCount
+          ItemCount
+        }
+        CVEList {
+          Id
+          Severity
+        }
+      }
+    }
+    ```
+
+    The response has the shape `data.CVEDiffListForImages` with the requested fields. For a multi-architecture image, add `Platform: {Os: "linux", Arch: "amd64"}` or a `Digest` to the image input to pick one manifest.
+  </Accordion>
+</AccordionGroup>
+
+## Related
+
+- [Search with GraphQL](/use/search-graphql): endpoint, pagination, sorting, and filters
+- [zli command line](/use/zli): the same searches without writing GraphQL
+- [CVE scanning](/security/cve-scanning)

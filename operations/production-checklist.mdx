@@ -1,0 +1,70 @@
+---
+title: "Production checklist"
+description: "Checks to complete before you run zot in production, with links to the page for each."
+icon: "clipboard-check"
+---
+
+Work through this list before you put a zot registry in front of real users. Each item links to the page that explains how to do it.
+
+<Warning>
+  The default configuration of the zot container image is for trying zot out. It has no authentication, no TLS, and a `debug` log level. Don't expose it to a network as it is.
+</Warning>
+
+## Network and TLS
+
+- [ ] **Serve over HTTPS.** Set `http.tls.cert` and `http.tls.key`, or terminate TLS at a load balancer you control. Docker requires HTTPS for any registry other than `localhost`. See [HTTP and TLS](/configuration/http).
+- [ ] **Use a certificate from a trusted CA**, such as Let's Encrypt or your organization's CA. Test a public-facing registry with a service such as the [Qualys SSL Server Test](https://www.ssllabs.com/ssltest/). See [Install on Linux](/install/linux#after-the-installation).
+- [ ] **Decide who can reach the registry** and restrict the listener address and network paths to match.
+
+## Authentication and access control
+
+- [ ] **Turn on authentication.** Choose htpasswd, LDAP, OpenID Connect, bearer tokens, or mutual TLS. See [Authentication](/security/authentication).
+- [ ] **Define access control policies** for each repository and decide deliberately whether to allow anonymous reads. See [Access control](/security/access-control).
+- [ ] **Set an `adminPolicy`.** With authentication on, admin-only endpoints such as profiling and trust-key upload need a matching `accessControl.adminPolicy`.
+- [ ] **Use API keys or tokens for automation** instead of personal passwords. See [API keys](/security/api-keys).
+- [ ] **Keep secrets out of the main configuration file.** Put credentials in separate files with strict permissions, or use Kubernetes Secrets. See [Configuration overview](/configuration/overview#keep-secrets-out-of-the-main-file).
+- [ ] **Restrict the metrics endpoint** with the `metrics` access policy. See [Monitoring](/operations/monitoring#restrict-who-can-read-metrics).
+
+## Storage
+
+- [ ] **Pick a storage backend** that fits your scale and durability needs, and put the data on a persistent, backed-up volume or bucket. See [Storage overview](/configuration/storage/overview).
+- [ ] **Choose the right cache driver.** BoltDB supports a single instance. If you run more than one zot instance against shared storage, use Redis or DynamoDB. See [Cache drivers](/configuration/storage/cache-drivers).
+- [ ] **Plan capacity.** Watch free space, and note that `dedupe` needs a filesystem with hard-link support for local storage.
+- [ ] **Configure garbage collection and tag retention** so storage doesn't grow without bound. See [Retention and garbage collection](/operations/retention-gc).
+
+## Run it safely
+
+- [ ] **Run as a dedicated non-root user and group.** zot doesn't need root privileges. For a privileged port, use [systemd socket activation](/install/linux#systemd-socket-activation) instead of running as root.
+- [ ] **Set resource limits.** Use systemd `MemoryHigh`, `MemoryMax`, and `LimitNOFILE` as in [Install on Linux](/install/linux), or Kubernetes requests and limits.
+- [ ] **Pin versions.** Use an explicit release tag for the binary or image, not `latest`, and upgrade deliberately. See [Upgrade zot](/install/upgrade).
+- [ ] **Use the minimal build if you don't need extensions.** It has a smaller attack surface. See [Releases and images](/install/releases).
+- [ ] **Enable only the extensions you need.** See [Enable extensions](/configuration/extensions).
+- [ ] **Don't leave profiling reachable** on a registry without authentication. See [Profile performance](/operations/profiling).
+- [ ] **Review the hardening guidance** in [Security posture](/security/posture).
+
+## Supply chain security
+
+- [ ] **Verify signatures** if you sign images, using the cosign and notation support. See [Verify image signatures](/security/signatures).
+- [ ] **Turn on CVE scanning** where it fits. It requires local storage. See [CVE scanning](/security/cve-scanning).
+- [ ] **Make release tags immutable** where they must never change. See [Immutable tags](/security/immutable-tags).
+
+## Observability
+
+- [ ] **Set the log level to `info`.** `debug` is verbose and can slow a busy registry. See [Logging](/configuration/logging).
+- [ ] **Turn on the audit log** if you need a record of who changed what, and keep `log.level` at `info` or `debug` so entries are written.
+- [ ] **Collect metrics** with Prometheus, and alert on `5xx` rates and latency. See [Monitoring](/operations/monitoring).
+- [ ] **Wire up health checks.** Use `/livez`, `/readyz`, and `/startupz` for load balancers and Kubernetes probes, or `zot healthcheck` where `curl` isn't available.
+- [ ] **Ship logs to a central place** so you can read them after a restart.
+
+## Availability and recovery
+
+- [ ] **Decide whether you need high availability or scale-out**, and set it up before launch. See [Clustering overview](/operations/clustering/overview).
+- [ ] **Back up** configuration, secrets, storage, and MetaDB, and **test a restore**. See [Backup and restore](/operations/backup-restore).
+- [ ] **Write down how to roll back** an upgrade. Don't downgrade without reading the release notes. See [Upgrade zot](/install/upgrade).
+
+## Validate before launch
+
+- [ ] **Validate the configuration** with `zot verify /etc/zot/config.json`.
+- [ ] **Benchmark a baseline** with [`zb`](/operations/benchmarking-zb) against a setup that matches production.
+- [ ] **Test your real clients**, for example Docker, containerd, or Kubernetes, with authentication and TLS on. See [Client compatibility](/clients/compatibility).
+- [ ] **Know where to look when it breaks.** See [Troubleshooting](/operations/troubleshooting).
