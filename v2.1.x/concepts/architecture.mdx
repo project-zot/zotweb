@@ -10,11 +10,11 @@ zot is an OCI-native container image registry. This page covers its design goals
 
 <AccordionGroup>
   <Accordion title="OCI-first" defaultOpen>
-    - **HTTP APIs strictly conform to the [OCI Distribution Specification](https://github.com/opencontainers/distribution-spec).** zot aims to be a production reference implementation of the specification. It doesn't support any other vendor protocol.
+    - **HTTP APIs strictly conform to the [OCI Distribution Specification](https://github.com/opencontainers/distribution-spec).** zot aims to be a production reference implementation of the specification. It doesn't implement any other vendor's registry protocol. Docker-format images are accepted through an opt-in compatibility mode on the same API. See [Docker client](/v2.1.x/clients/docker#docker-image-format-compatibility).
     - **Storage follows the [OCI Image Specification](https://github.com/opencontainers/image-spec).** The only supported layout is the OCI image layout. As a result, zot can serve any existing OCI image layout, and it converts data on the wire into that layout.
   </Accordion>
   <Accordion title="Single binary" defaultOpen>
-    zot is one binary with all features included, so deployment is simple on bare metal, cloud, and embedded devices. A single configuration file controls its behavior.
+    zot ships as a single binary, and the full binary includes every feature, so deployment is simple on bare metal, cloud, and embedded devices. A single configuration file controls its behavior.
   </Accordion>
   <Accordion title="Enable only what you need" defaultOpen>
     The core OCI-compliant HTTP APIs and storage are separate from add-on features modeled as [extensions](/v2.1.x/concepts/extensions). You can select extensions at build time and at run time. See [Security posture](/v2.1.x/security/posture) for conditional builds.
@@ -25,11 +25,14 @@ zot is an OCI-native container image registry. This page covers its design goals
 
 zot is organized as: **zot-full = zot-minimal + extensions**.
 
-<Frame caption="The minimal build is the core registry. The full build adds extensions.">
-  <img src="/images/zot-architecture.jpg" alt="Architecture diagram: clients reach HTTP APIs, which sit above configuration and authentication, container image data storage, metadata storage, a task scheduler, and extensions" style={{ maxWidth: "460px" }} />
+<Frame caption="Core components are in every build. Extensions are in the full build and you enable them in the configuration.">
+  <div className="overflow-x-auto">
+    <img style={{ minWidth: 640 }} className="dark:hidden" src="/images/zot-architecture-light.svg" alt="Architecture diagram. Clients reach zot over HTTP or HTTPS. The OCI Distribution Specification API and the extension APIs sit behind TLS, authentication, authorization and rate limiting. The core contains image storage, MetaDB and a task scheduler. The full build adds extensions: search and CVE scan, web UI, sync, scrub, lint, metrics, image trust and events." />
+    <img style={{ minWidth: 640 }} className="hidden dark:block" src="/images/zot-architecture-dark.svg" alt="Architecture diagram. Clients reach zot over HTTP or HTTPS. The OCI Distribution Specification API and the extension APIs sit behind TLS, authentication, authorization and rate limiting. The core contains image storage, MetaDB and a task scheduler. The full build adds extensions: search and CVE scan, web UI, sync, scrub, lint, metrics, image trust and events." />
+  </div>
 </Frame>
 
-- The **minimal build** is the core registry described by the OCI Distribution Specification.
+- The **minimal build** is the core registry: the Distribution Specification API, TLS, authentication and authorization, rate limiting, image storage with garbage collection, retention and deduplication, MetaDB, and the task scheduler.
 - The **full build** adds features outside the specification that the specification allows as [extensions](https://github.com/opencontainers/distribution-spec/tree/main/extensions).
 
 ## Components
@@ -41,10 +44,14 @@ Clients and administrators interact with zot in two ways:
 - **Client-initiated queries** for data and metadata, over HTTP APIs. Core data path queries follow the OCI Distribution Specification.
 - **Admin-initiated configuration**.
 
-What happens to metadata queries depends on the `search` extension:
+The standard Distribution Specification endpoints, such as catalog, tag list, and referrers, are always available. With the `search` extension enabled, you can also run GraphQL queries over image metadata. See [Search with GraphQL](/v2.1.x/use/search-graphql).
 
-- **Enabled:** zot maintains a database and answers complex queries efficiently through GraphQL. See [Search with GraphQL](/v2.1.x/use/search-graphql).
-- **Disabled:** basic queries use the core APIs. They search storage directly, so they're less efficient and more limited.
+### MetaDB
+
+zot keeps a metadata database, called MetaDB, for features that need to query images or store state. It's created only when at least one of these is enabled: the `search` extension, basic authentication (which stores user API keys and preferences), image trust, retention, or quotas.
+
+- **Local storage:** MetaDB is a local BoltDB file.
+- **Remote storage:** MetaDB uses Redis or DynamoDB. DynamoDB works only with S3 storage. See [Cache drivers](/v2.1.x/configuration/storage/cache-drivers).
 
 ### Configuration
 
@@ -61,7 +68,7 @@ zot supports a full set of authentication and authorization options natively. Th
 zot supports any modern local filesystem and AWS S3 or S3-compatible storage. It also supports GCS and Azure Blob Storage. See [Storage overview](/v2.1.x/configuration/storage/overview).
 
 <Note>
-  Deduplication works on local and remote filesystems, but it needs a filesystem with hard-link support.
+  On local storage, deduplication uses hard links, so the filesystem must support them. Remote storage uses a cache driver instead.
 </Note>
 
 ### Security scanning
@@ -70,4 +77,4 @@ zot integrates with the [trivy](https://github.com/aquasecurity/trivy) scanner t
 
 ### Background tasks
 
-A task scheduler runs periodic work such as garbage collection, sync, and scrubbing. It's designed not to degrade or interrupt foreground HTTP requests. See [Background tasks](/v2.1.x/configuration/background-tasks).
+A task scheduler runs periodic work such as garbage collection, retention, sync, and scrubbing. It's designed not to degrade or interrupt foreground HTTP requests. See [Background tasks](/v2.1.x/configuration/background-tasks).

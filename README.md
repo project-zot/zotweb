@@ -61,6 +61,17 @@ mint validate
 
 The script copies the pages to `v2.2.x/`, rewrites their internal links, and adds the version to `docs.json`. Re-running it for the same label rebuilds that snapshot from latest, so only do that while the line is still current. Backport fixes to an older line by editing its folder directly.
 
+### Diagrams
+
+The architecture and overview diagrams are generated SVGs with outlined text, one file per theme (`images/zot-architecture-light.svg`, `-dark.svg`, and the same for `zot-overview`). Pages show one or the other with `dark:hidden` and `hidden dark:block`, inside an `overflow-x-auto` wrapper so they stay legible on phones. To change a diagram, edit `scripts/build-diagrams.py` and re-run it:
+
+```bash
+pip install fonttools
+python3 scripts/build-diagrams.py --outfit Outfit.ttf --mono JetBrainsMono-Regular.ttf --out images
+```
+
+Both fonts are SIL Open Font License (Outfit variable font and JetBrains Mono). Then re-run `scripts/snapshot-version.py` if the change should also appear in a frozen version.
+
 ### Refresh the API reference
 
 `api-reference/openapi.yaml` is derived from `swagger/swagger.yaml` in the zot repository, converted from Swagger 2.0 to OpenAPI 3 and then adjusted by hand (server, security schemes, tags, response codes). Regenerate it per release and re-apply the adjustments, then compare the endpoint list with `pkg/api/routes.go`. Endpoints that are not in the spec are documented in `api-reference/extensions.mdx`.
