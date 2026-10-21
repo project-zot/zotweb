@@ -1,0 +1,91 @@
+---
+title: "Quickstart"
+description: "Run zot, push an image, and pull it back in five minutes."
+icon: "bolt"
+---
+
+This guide runs zot in a container on your machine, pushes an image to it, and opens the web UI. It doesn't configure authentication or TLS, so use it for local testing only.
+
+## Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/) or [Podman](https://podman.io/)
+- [skopeo](https://github.com/containers/skopeo) to copy images. You can also use `regctl` or `oras`. See [Push and pull images](/v2.1.x/use/push-pull).
+
+## Run zot
+
+<Steps>
+  <Step title="Start the registry">
+    <CodeGroup>
+      ```bash Docker
+      docker run -d --name zot -p 5000:5000 ghcr.io/project-zot/zot:latest
+      ```
+
+      ```bash Podman
+      podman run -d --name zot -p 5000:5000 ghcr.io/project-zot/zot:latest
+      ```
+    </CodeGroup>
+
+    The container image starts zot with a default configuration. It listens on port `5000`, stores data in `/var/lib/registry`, and enables the web UI, search, and management API.
+  </Step>
+
+  <Step title="Check that it's running">
+    ```bash
+    curl http://localhost:5000/v2/_catalog
+    ```
+
+    A new registry has no repositories:
+
+    ```json
+    {"repositories":[]}
+    ```
+  </Step>
+
+  <Step title="Push an image">
+    Copy the `busybox` image from Docker Hub to your registry:
+
+    ```bash
+    skopeo copy --dest-tls-verify=false --multi-arch=all \
+      docker://busybox:latest \
+      docker://localhost:5000/busybox:latest
+    ```
+  </Step>
+
+  <Step title="Pull the image">
+    ```bash
+    docker pull localhost:5000/busybox:latest
+    ```
+
+    Docker treats `localhost` as a trusted registry, so no TLS configuration is needed here.
+  </Step>
+
+  <Step title="Browse in the web UI">
+    Open [http://localhost:5000](http://localhost:5000) in your browser and search for `busybox`.
+  </Step>
+</Steps>
+
+## Clean up
+
+```bash
+docker rm -f zot
+```
+
+<Warning>
+  This setup has no authentication and no TLS. Before you expose zot to a network, follow [Authentication](/v2.1.x/security/authentication) and [HTTP and TLS](/v2.1.x/configuration/http), and review the [Production checklist](/v2.1.x/operations/production-checklist).
+</Warning>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Install for real" icon="download" href="/v2.1.x/install/choose-method">
+    Run zot as a service or on Kubernetes.
+  </Card>
+  <Card title="Configure zot" icon="sliders" href="/v2.1.x/configuration/overview">
+    Control storage, extensions, and behavior with one config file.
+  </Card>
+  <Card title="Use the zli CLI" icon="square-terminal" href="/v2.1.x/use/zli">
+    Query images and CVEs from the command line.
+  </Card>
+  <Card title="Set up Docker" icon="docker" href="/v2.1.x/clients/docker">
+    Docker client quirks and how to configure around them.
+  </Card>
+</CardGroup>

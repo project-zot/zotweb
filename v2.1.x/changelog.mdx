@@ -1,0 +1,717 @@
+---
+title: "Changelog"
+description: "What changed in each zot release, newest first."
+icon: "clock-rotate-left"
+---
+
+Release notes for zot. Downloadable assets for every release are on [GitHub releases](https://github.com/project-zot/zot/releases). Look for **Upgrade impact** tags and read [Upgrade zot](/v2.1.x/install/upgrade) before you upgrade.
+
+<Update label="v2.1.22" description="2026-10-06" tags={["Upgrade impact"]}>
+### Storage Outage and Data-Integrity Handling
+
+- Storage drivers now distinguish missing content from transient failures and permanent errors across local, S3, GCS, and Azure storage.
+- Registry API requests return `503 Service Unavailable` for transient storage failures and `500 Internal Server Error` for permanent failures instead of reporting misleading `404`, `400`, or `403` responses.
+- Garbage collection, deduplication, scrub, and storage enumeration fail closed when a backend cannot provide a complete view. The affected operation aborts and can retry on its next cycle instead of pruning content based on an assumed-empty result.
+- Re-uploading a manifest repairs equal-size corruption, including remote dedupe origins. Additional fixes prevent remote dedupe self-link and concurrent-upload races from emptying shared content or returning spurious `500` responses.
+- Garbage collection now completes for repositories that do not have a MetaDB record, and an overwritten tag's previous digest remains pullable as an untagged manifest until retention and garbage collection remove it.
+- Corrupt S3 dedupe stubs no longer return a successful empty blob response.
+
+See [Storage](/v2.1.x/configuration/storage/overview#storage-failure-handling).
+
+### Sync and Multi-Architecture Images
+
+- Periodic sync can use `platforms` at the registry or content-rule level to copy only selected `os/arch[/variant]` children of a multi-architecture index.
+- Sync now preserves upstream digests. The `preserveDigest` setting is deprecated and ignored; syncing Docker schema 2 content requires `http.compat: ["docker2s2"]`.
+- `onDemandInBackground` can return a local `404` immediately while filling the image asynchronously, allowing clients configured with another registry to fail over without waiting.
+- Hard on-demand upstream failures now return `503` rather than falling through to `404`, while genuine upstream misses remain `404`.
+- On-demand sync reuses locally stored layers before fetching remotely, and search metadata updates correctly as sparse multi-architecture images are populated.
+- AWS ECR sync credential helpers can again run `credential_process` commands correctly.
+
+See [OCI registry mirroring](/v2.1.x/operations/mirroring) and [OCI registry mirroring](/v2.1.x/operations/mirroring#on-demand-sync-in-the-background).
+
+### Authentication and Security
+
+- **Upgrade impact:** when authentication is enabled, profiling and trust-key upload endpoints now require an explicit matching `accessControl.adminPolicy`. Without an admin policy, authenticated users can still receive repository access but cannot use these admin-only routes.
+- API keys, OpenID sessions, workload OIDC tokens, and traditional bearer authentication can coexist. zot's token endpoint exchanges locally issued API keys and can forward only unknown credentials to a configured upstream token service.
+- zot-issued API keys are never forwarded to an upstream token endpoint.
+- HTTPS responses include `Strict-Transport-Security: max-age=63072000; includeSubDomains`.
+- Anonymous-only UI deployments no longer return `500` when checking for a session.
+- Legacy cosign signature and SBOM tag recognition now requires the complete canonical tag form.
+
+See [Authentication and authorization](/v2.1.x/security/authentication) and [Configuring zot](/v2.1.x/configuration/overview).
+
+### Runtime, API, and Compatibility Improvements
+
+- `zot healthcheck` (alias `zot ready`) probes `/livez`, `/readyz`, or `/startupz` without requiring a shell or `curl`, including in distroless containers.
+- zot notifies systemd when startup has completed and when shutdown begins; service units can use `Type=notify`.
+- Manifest pushes now reject invalid Distribution Specification tags with `400 MANIFEST_INVALID`. Existing non-conformant tags remain readable and deletable.
+- A manifest that references a missing blob returns `MANIFEST_BLOB_UNKNOWN` with the missing digest.
+- Catalog and tag pagination continue correctly if the `last` cursor was deleted, and large tag-list page sizes no longer overflow.
+- Missing-repository manifest deletes now return `404`, missing nested-repository referrers return an empty index, and streamed upload `Range` responses cover the complete upload.
+- Cosign attestations are classified as referrers rather than signatures and no longer make an image appear signed.
+
+See [Installing zot on bare metal Linux](/v2.1.x/install/linux) and [Push and pull image content](/v2.1.x/use/push-pull).
+
+<Note>
+  Signature and attestation layer payloads are no longer stored in MetaDB. This prevents large metadata records, but existing BoltDB files do not shrink automatically. Compact reclaims space only after rewritten records leave freelist pages; a full `meta.db` rebuild is a separate, more disruptive option. See [Verifying image signatures](/v2.1.x/security/signatures). Avoid downgrading to a release that expects signature content to be present in MetaDB.
+</Note>
+</Update>
+
+<Update label="v2.1.21" description="2026-09-06" tags={["Upgrade impact"]}>
+### Sync Throughput and Upstream Check Controls
+
+- On-demand sync can set `manifestCheckInterval` to serve a locally cached tag without checking the upstream registry again until the interval expires.
+- `reqConcurrent` and `reqPerSec` configure per-host upstream concurrency and request-rate limits.
+- `disableHTTP2` and `maxIdleConnsPerHost` can improve throughput on high-bandwidth links by using a pool of parallel HTTP/1.1 connections.
+- Concurrent on-demand requests for the same image are now coalesced into one upstream sync operation.
+
+See [OCI registry mirroring](/v2.1.x/operations/mirroring).
+
+### Storage and Distribution Behavior
+
+- **Upgrade impact:** blob `HEAD` and ranged `GET` requests are repository-local by default. A digest that exists only in another repository's dedupe cache now returns `404` instead of being materialized into the requested repository. Set `storage.hydrateBlobOnRead` to `true` only when the previous behavior is required.
+- Cross-repository dedupe mounts now require read access to a source repository that contains the blob, as well as create access to the destination repository.
+- Garbage collection now correctly handles multi-tag manifests, shared cosign referrers, nested indexes, and Docker-compatible media types without repeated exponential index walks.
+- Dedupe and storage walks now cover nested repository namespaces and avoid redundant full-storage traversals.
+
+See [Storage](/v2.1.x/configuration/storage/overview).
+
+### Runtime and Deployment Improvements
+
+- zot supports systemd socket activation, including binding privileged ports without granting the zot process `CAP_NET_BIND_SERVICE`.
+- Configuration files mounted from Kubernetes ConfigMaps and `htpasswd` files mounted from Secrets are detected after atomic symlink replacement and reloaded without restarting the pod.
+- Event sink configuration can now be enabled, disabled, or changed by a configuration reload.
+
+See [Installing zot on bare metal Linux](/v2.1.x/install/linux#systemd-socket-activation), [Configuring zot](/v2.1.x/configuration/overview), and [Authentication and authorization](/v2.1.x/security/authentication#htpasswd).
+
+### Scanning, Signing, Events, and Management
+
+- Trivy scans can use a configured ignore file through `extensions.search.cve.trivy.ignoreFile`.
+- Image trust recognizes and verifies the Sigstore bundle format produced by cosign v3 (`application/vnd.dev.sigstore.bundle.v0.3+json`).
+- Event publishers can override the CloudEvents `source` and event-type namespace with `source` and `typePrefix`.
+- The management endpoint reports `http.auth.allowAnonymousAccess: true` when any repository has an `anonymousPolicy`, allowing clients such as the zot UI to offer guest access without probing the registry.
+
+See [CVE scanning](/v2.1.x/security/cve-scanning), [Verifying image signatures](/v2.1.x/security/signatures#cosign-v3-sigstore-bundles), and [Events](/v2.1.x/operations/events#cloudevents-identity).
+
+### Reliability and Compatibility Fixes
+
+- Docker schema 2 media types are preserved through storage metadata, search, delete, prune, and scrub operations.
+- SBOM generation no longer broadens Trivy vulnerability detection or produces additional CVE results.
+- Repository quota slots are released when the final manifest is deleted from a repository.
+- Additional fixes improve Kubernetes-mounted authentication reloads, sync cleanup, event delivery logging, metrics lifecycle, download statistics, and storage locking under concurrent uploads.
+</Update>
+
+<Update label="v2.1.20" description="2026-08-04">
+This release primarily restores the downloadable binaries that were not published with v2.1.19. Download the binaries from the [v2.1.20 GitHub release](https://github.com/project-zot/zot/releases/tag/v2.1.20). This release also includes UI improvements from an updated `zui` version.
+</Update>
+
+<Update label="v2.1.19" description="2026-08-03">
+### Workload Identity and Sync Authentication
+
+- OIDC workload identity tokens can now complete the registry token-service login flow, including Kubernetes `imagePullSecret` authentication.
+- Sync adds OAuth2 JWT assertion and RFC 8693 token-exchange credential helpers for short-lived upstream credentials.
+- A new `gcp` credential helper uses Google Application Default Credentials to mirror from Google Artifact Registry and compatible registries.
+
+See [Authentication and authorization](/v2.1.x/security/authentication) and [OCI registry mirroring](/v2.1.x/operations/mirroring).
+
+### Retention and Garbage Collection Controls
+
+- Retention policies can protect actively used untagged manifests, such as digest-only pull-through cache entries, with `keepUntagged`.
+- Periodic garbage collection can be restricted to a daily UTC `gcTimeWindow`, including windows that cross midnight.
+
+See [Tag retention policies](/v2.1.x/operations/retention-gc) and [Storage](/v2.1.x/configuration/storage/overview).
+
+### Signing, Scanning, Events, and GraphQL
+
+- Generated notation trust policies now support the `tsa:default` trust store for timestamped signatures.
+- Trivy scanning now accepts OCI zstd-compressed layers.
+- Successful, non-cached image scans emit `zotregistry.image.scanned` events with vulnerability summaries.
+- GraphQL `ImageSummary` now exposes `ArtifactType`.
+
+See [Verifying image signatures](/v2.1.x/security/signatures), [CVE scanning](/v2.1.x/security/cve-scanning), [Events](/v2.1.x/operations/events), and [GraphQL](/v2.1.x/use/search-graphql).
+
+### Reliability, Conformance, and Security Fixes
+
+- Hardened the OIDC UI callback redirect against open redirects that used a backslash in the target URL.
+- Sync registries can set `maxRetryDelay` for exponential HTTP retry backoff (when greater than `retryDelay`).
+- Improved OCI conformance for malformed manifest references, referrers responses, and blob digest errors.
+- Additional fixes cover digest multi-tag overwrite authorization, cosign verification binding, garbage collection of incomplete content, storage integrity checks, sync diagnostics and credential refresh, Windows repository paths, and metadata robustness.
+
+See [OCI registry mirroring](/v2.1.x/operations/mirroring) and [Events](/v2.1.x/operations/events).
+</Update>
+
+<Update label="v2.1.18" description="2026-06-24">
+### Trivy-Based SBOM Artifact Generation
+
+zot now supports generating SBOM artifacts during Trivy CVE scans and publishing them as OCI referrers for scanned images.
+
+For configuration and usage details, see [CVE scanning](/v2.1.x/security/cve-scanning).
+
+### Storage: Azure Backend, Fast Restart, and Blob Redirects
+
+This release adds multiple storage improvements:
+
+- Added Azure Blob Storage support as a remote `storageDriver` backend (`name: "azure"`)
+- Added optional `storage.fastRestart` to reduce startup time by skipping storage walk when safe
+- Added optional `storage.redirectBlobURL` for redirecting blob pulls to backend signed URLs
+
+For details and examples, see [Storage](/v2.1.x/configuration/storage/overview).
+
+### Authentication and Authorization Enhancements
+
+- Added authorization support for GitHub team memberships in OpenID login flows
+- Added metrics endpoint anonymous access controls with stricter authz behavior for authenticated users not in metrics ACL
+- Added metrics path validation hardening for safer configuration
+
+See [Authentication and authorization](/v2.1.x/security/authentication) and [Monitoring](/v2.1.x/operations/monitoring).
+
+### Event Payload Metadata Improvements
+
+The events extension now includes actor and request metadata in webhook payloads when request context is available.
+
+See [Events](/v2.1.x/operations/events).
+
+### zli Configuration UX
+
+`zli` now supports default named configurations so commands can run without explicitly passing `--config` or `--url` when a default is set.
+
+See [zli user guide](/v2.1.x/use/zli).
+
+### Bug fixes
+
+Many bug fixes around storage behavior, authentication and authorization flows, metrics, CVE reference links, and dependency updates.
+</Update>
+
+<Update label="v2.1.17" description="2026-05-17">
+### OIDC Logout and Identity Mapping
+
+zot now supports OpenID Connect RP-Initiated Logout and includes improvements to identity handling and claim-mapping logs.
+
+```json
+{
+  "issuer": "https://iam.example.com",
+  "scopes": ["openid", "profile", "email", "groups"]
+}
+```
+
+Authentication mapping also adds support for OpenID groups claims, making it easier to align external identity providers with zot access policies.
+
+```json
+{
+  "claimMapping": {
+    "username": "preferred_username",
+    "groups": "groups"
+  }
+}
+```
+
+### Conditional Authorization via CEL
+
+Authorization policies can now use conditional expressions through CEL (Common Expression Language), enabling more context-aware access control decisions.
+
+```json
+{
+  "conditions": [
+    {
+      "expression": "req.time < timestamp(\"2099-12-31T23:59:59Z\")",
+      "message": "alice's prod access expires end of 2099"
+    }
+  ]
+}
+```
+
+### Blob Transfer and Upload Handling Improvements
+
+This release includes multiple API and distribution improvements:
+
+- Added support for multipart range blob pulls and multipart download enhancements
+- Improved upload range handling (including proper `416` responses for invalid ranges)
+- Recognized Docker Compose/Buildx user agents in the v2 auth challenge workaround
+
+### HTTP Read/Write Timeout Configuration
+
+HTTP read and write timeouts are now configurable for both the API server and metrics exporter, with defaults set to `60s`.
+
+Use larger values for environments that handle large images or slower client/network paths. You can also set the timeout values to `0` to disable timeouts (infinite timeout) when required.
+
+For configuration examples and behavior details, see [Security Posture: HTTP read/write timeout configuration](/v2.1.x/security/posture).
+
+### zli and Configuration UX Enhancements
+
+Several usability updates were added to `zli`:
+
+- Improved CVE diff output
+- Added a typed `~/.zot` config layer with strict validation
+- Added config management commands: `list`, `show`, `get`, `set`, and `reset`
+
+### Observability, Signing, and UI Updates
+
+- Added Prometheus metrics for garbage collection
+- Added support for cosign bundle metadata
+- Updated UI dependencies (`zui`) and related integration pieces
+
+### Bug fixes
+
+Many bug fixes around authentication, sync filtering, transfer reliability, lint/CI, dependency updates, and other miscellaneous improvements.
+</Update>
+
+<Update label="v2.1.16" description="2026-04-19">
+### Repository Quota Enforcement
+
+zot now includes repository quota enforcement middleware in the API layer, helping limit repository growth according to configured quota policies.
+
+Configuration summary (from PR #3923): set `storage.maxRepos` to cap how many repositories can be created. When the limit is reached, pushes that create a new repository are rejected (HTTP 429), while pushes to existing repositories continue to work. Setting `maxRepos` to `0` (or omitting it) disables enforcement.
+
+```json
+{
+  "storage": {
+    "maxRepos": 10
+  }
+}
+```
+
+### Multi-tag Push Support
+
+zot now supports pushing multiple tags for a single manifest, improving tag management workflows and reducing duplicate push operations.
+
+`PUT /v2/<name>/manifests/<digest>?tag=1.2.3&tag=1.2&tag=1&tag=latest`
+
+### Configuration Schema Export
+
+A new schema command (`zot schema`) can now dump the [JSON Schema](https://github.com/project-zot/zot/releases/download/v2.1.16/zot-schema.json) for zot configuration, making validation and tooling integration easier.
+
+### Storage and Authentication Fixes
+
+- Fixed GCS storage handling for root directory prefixing and EOF behavior during walk operations
+- Added workaround for Docker client authentication in mixed anonymous-policy setups
+- Prevented repository update flows from corrupting `index.json` when disk space is exhausted
+
+### Security Hardening
+
+Several hardening fixes were included in this release:
+
+- Limited manifest PUT request bodies to 4 MiB
+- Limited API key creation request bodies to 4 KiB
+- Suppressed `Allow-Credentials` when CORS origin is wildcard
+- Removed `InsecureSkipVerify` usage from metrics client TLS
+
+### UI and Search Metadata Enhancements
+
+- Added `LastPullTimestamp` and `PushedBy` fields to search/index `ImageSummary`
+- Updated UI dependencies (`zui`) and related integration improvements
+
+### Bug fixes
+
+Many bug fixes around security, storage, CI workflows, and other miscellaneous features.
+</Update>
+
+<Update label="v2.1.15" description="2026-03-08">
+### GCS Storage Support
+
+zot now supports Google Cloud Storage (GCS) as a storage backend, expanding the available storage options alongside existing S3-compatible storage solutions.
+
+### Dynamic TLS Certificate Reloading
+
+TLS certificates can now be automatically reloaded when changed on disk, eliminating the need to restart zot when certificates are renewed. This is particularly useful in environments with short-lived certificates or automated certificate rotation.
+
+### Enhanced OIDC and JWT Authentication
+
+Multiple improvements to authentication capabilities:
+
+- **Per-issuer CA support**: Configure custom certificate authorities for individual OIDC issuers
+- **AWS Secrets Manager integration**: Support for AWS Secrets Manager for JWT verification key storage
+- **Fine-grained JWT expiration**: Configure `exp` claim at the access entry level for more granular token lifetime control
+
+### UI and GraphQL Enhancements
+
+- Added `TaggedTimestamp` to `ImageSummary` returned by GraphQL API
+- "Last Tagged" timestamp now displayed in the tag details view in zot's UI
+
+### Sync Improvements
+
+- **Legacy Cosign tag filtering**: New `SyncLegacyCosignTags` configuration option to selectively skip syncing legacy cosign/SBOM tags
+- **Smart OCI conversion**: Skip OCI conversion for already-synced images, improving sync performance
+
+### Security Fixes
+
+- Fixed open redirect vulnerability via `callback_ui`
+- Ensured "latest" tag authz checks are not skipped during updates
+
+### Bug fixes
+
+Many bug fixes around metadata timestamps, Windows path handling, and other miscellaneous features.
+</Update>
+
+<Update label="v2.1.14" description="2026-01-24">
+### Workload Identity Federation
+
+zot can now authenticate workloads using OIDC ID tokens, enabling secret-less authentication for automated workflows.
+
+See [examples/config-bearer-oidc-workload.json](https://github.com/project-zot/zot/blob/v2.1.14/examples/config-bearer-oidc-workload.json) for an example configuration.
+
+### Bug fixes
+
+Many bug fixes around storage and other miscellaneous features.
+</Update>
+
+<Update label="v2.1.13" description="2025-12-23">
+### Bug fixes
+
+Fixes a bug where requests having an Authorization header are rejected if basic
+auth is disabled.
+</Update>
+
+<Update label="v2.1.12" description="2025-12-19">
+### mTLS Configuration
+
+Previously, there were some access control/authz limitations when enabling UI
+and mTLS for machine clients. Now [mTLS authn configuration](/v2.1.x/security/authentication) supports more
+flexible identity extraction from peer certs so that access control is
+uniformly enforced.
+
+### Bug fixes
+
+Many bug fixes around security, sync and other miscellaneous features.
+</Update>
+
+<Update label="v2.1.11" description="2025-11-20">
+### Further FIPS 140-3 Improvements
+
+Previously, password-based authentication supported only _bcrypt_ (based on
+Blowfish) which is not FIPS 140 approved. Starting with this release, both
+SHA256 and SHA512 based hashes are supported. You can use `mkpasswd` utility
+(available on most Linux distributions) for this purpose.
+
+### Test Retention Policies
+
+A `verify-feature` retention subcommand has been added that allows users to
+preview and validate retention policy changes without running the actual zot
+server. The command runs GC and retention tasks in dry-run mode for immediate
+feedback.
+
+`zot verify-feature retention -l /var/log/zot-retention-check.log -i 1m -t 10m <config-file>`
+
+### Improved Self-Hosted OAuth2 Support
+
+Some self-hosted applications such as GitHub Enterprise require custom auth url,
+token url and username claim mapping.
+
+```json
+  "auth": {
+      "openid": {
+        "providers": {
+          "github": {
+            "clientid": <client_id>,
+            "clientsecret": <client_secret>,
+            "authurl": "https://github.company.com/login/oauth/authorize",     // Custom GHE authorization endpoint
+            "tokenurl": "https://github.company.com/login/oauth/access_token", // Custom GHE token endpoint
+            "scopes": ["read:org", "user", "repo"],
+            "claimMapping": {
+              "username": "preferred_username"                                 // Custom claim mapping
+            }
+          }
+        }
+      }
+```
+
+### UI Improvements
+
+zot's UI has been migrated to use [vite](https://vite.dev/) which helps with
+startup times and long-term project maintenance.
+
+### Bug fixes
+
+Many bug fixes around security, sync and other miscellaneous features.
+</Update>
+
+<Update label="v2.1.10" description="2025-10-18">
+### zot as a Golang Library
+
+zot was originally intended as an application although implemented in golang.
+Starting from this release zot can also be used as a golang [library](https://pkg.go.dev/zotregistry.dev/zot/v2).
+
+`import zotregistry.dev/zot/v2`
+
+However, note that this aspect will be best-effort only.
+
+### Bug fixes
+
+Some minor bug fixes.
+</Update>
+
+<Update label="v2.1.9" description="2025-10-13">
+### Garbage Collection and Retention
+
+Untagged manifests are now removed by default in garbage collection unless they are referenced by indexes or artifacts.
+Previously they were only removed if the retention policies settings were present in the zot configuration.
+If unspecified, the configuration option for retention delay (used for untagged manifests and orphan referrers),
+now defaults to the GC delay instead of 24 hours.
+
+### FIPS 140-3 Compliance
+
+On Linux, zot can be deployed in FIPS 140-3 mode (in terms of
+cryptographic protocols used) by setting the environment variable
+[`GODEBUG="fips140=only"`](https://go.dev/doc/security/fips140).
+
+Note that GODEBUG=fips140=on and only are not supported on OpenBSD, Wasm, AIX, and 32-bit Windows platforms.
+
+### Bug fixes
+
+Update the GraphQL playground version to 5.2, as the old one had broken online dependencies.
+</Update>
+
+<Update label="v2.1.8" description="2025-09-01">
+### Bug fixes
+
+Some bug fixes in sync mirroring and garbage collection.
+</Update>
+
+<Update label="v2.1.7" description="2025-08-03">
+### zot OCI Container Images for FreeBSD
+
+FreeBSD community has been releasing [OCI images](https://download.freebsd.org/releases/OCI-IMAGES/) to enable their container ecosystem.
+
+zot is now releasing OCI images to deploy and run as native FreeBSD containers.
+For example, `ghcr.io/project-zot/zot-freebsd-amd64:latest`.
+
+### Bug fixes
+
+Some minor bug fixes.
+</Update>
+
+<Update label="v2.1.6" description="2025-07-26">
+### Liveness and Readiness Endpoints for Kubernetes Deployments
+
+New HTTP endpoints are added for improved Kubernetes deployments - `/livez`,
+`/readyz` and `/startupz`. Helm chart has been updated.
+
+### OpenID Credentials Stored in Files
+
+Previously OpenID credentials were specified inline in zot configuration. Now,
+they can be loaded from a separate file and the file can be constructed as a
+Kubernetes `Secret`.
+
+### Bug fixes
+
+Some bug fixes around FreeBSD builds.
+</Update>
+
+<Update label="v2.1.5" description="2025-06-17">
+### Gitlab Social Login
+
+Gitlab login is now supported in zot UI.
+
+### Events Extension Token and Custom HTTP Header Support
+
+Earlier, [events extension](/v2.1.x/operations/events) for HTTP sink supported only
+basic authentication. Now token authentication is supported. Furthermore, you
+can also include customer HTTP headers to enable sink side routing, etc.
+</Update>
+
+<Update label="v2.1.4" description="2025-06-05">
+### Bug fixes
+
+Some bug fixes around authentication and authorization.
+</Update>
+
+<Update label="v2.1.3" description="2025-05-22">
+### Event generation
+
+zot can now generate [registry-significant events](/v2.1.x/operations/events) that can be published to http or nats endpoints.
+
+### Improved `docker` Support in UI
+
+Native docker images are now correctly displayed in the Web UI.
+
+### Redis driver Support
+
+Previous releases supported a local BoltDB or a remote DynamoDB database in
+order to store image and blob metadata. This release now includes support for
+[_Redis_](/v2.1.x/configuration/storage/cache-drivers#redis).
+
+### AWS ECR Sync Support With Temporary Token Authentication
+
+[AWS ECR](/v2.1.x/operations/mirroring) can now be used as the upstream registry to mirror from and the
+configuration allows for an authentication helper.
+
+### Sync Exclude Regex
+
+While mirroring from an upstream registry, it is now possible to exclude images with a regex pattern.
+
+### Windows Binaries
+
+Native Windows binaries (both amd64 and arm64) are now distributed with the release.
+
+### Bug fixes
+
+The following security issue has been fixed in this release.
+
+[`GHSA-c37v-3c8w-crq8/CVE-2025-48374`](https://github.com/project-zot/zot/security/advisories/GHSA-c37v-3c8w-crq8)
+</Update>
+
+<Update label="v2.1.2" description="2025-01-17">
+### Compatibility with other image schema types
+
+A [new configuration setting](/v2.1.x/configuration/overview) allows you to store images using the schema [Docker Manifest v2 Schema v2](https://distribution.github.io/distribution/spec/manifest-v2-2/). With this setting enabled, zot makes no modifications to the image's manifest or digest. Such modifications would otherwise break the image's signature and attestations.
+
+### Bug fixes
+
+The following security issue has been fixed in this release.
+
+[`GHSA-c9p4-xwr9-rfhxi/CVE-2025-23208`](https://github.com/project-zot/zot/security/advisories/GHSA-c9p4-xwr9-rfhx)
+</Update>
+
+<Update label="v2.1.0" description="2024-07-09">
+### Scale-out cluster
+
+You can build a [scale-out cluster](/v2.1.x/operations/clustering/scale-out) (proxy/shard based
+on repository name). Scale-out cluster is compatible with "sync" feature.
+
+### Bug fixes
+
+The following security issue has been fixed in this release.
+
+[`GHSA-55r9-5mx9-qq7r/CVE-2024-39897`](https://github.com/project-zot/zot/security/advisories/GHSA-55r9-5mx9-qq7r)
+</Update>
+
+<Update label="v2.0.4" description="2024-04-24">
+This is a maintenance release with minor bug fixes.
+</Update>
+
+<Update label="v2.0.3" description="2024-03-26">
+This is a maintenance release with minor bug fixes.
+</Update>
+
+<Update label="v2.0.2" description="2024-03-13">
+### CVE Query Enhancements
+
+It is now possible to bisect CVEs (`zli cve diff`) between two image
+tags/versions in the same repository. Furthermore, a CVE query for a particular
+image tag can return a detailed description of CVEs.
+
+### Documentation for "Immutable Image Tags"
+
+A new article has been added to document how image tags can be made
+[immutable](/v2.1.x/security/immutable-tags).
+
+### Cross-repo tag search in UI
+
+You can now search for a tag across all repos by starting your query as
+`:<tag>` in the UI, which will return all images that have that tag.
+
+### Support for [ORAS Artifacts](https://github.com/oras-project/artifacts-spec) removed
+
+[OCI distribution spec](https://github.com/opencontainers/distribution-spec)
+1.1.0 has added support "artifacts" which is likely to gain wider adoption.
+ORAS artifacts are not widely used or supported.
+
+<Warning>
+  Support is removed starting from this version.
+</Warning>
+</Update>
+
+<Update label="v2.0.1" description="2024-01-25">
+### Support for hot reloading of LDAP credentials file
+
+Since v2.0.0, LDAP credentials have been specified in a separate file. Starting with this version, the file is watched and changes applied without restarting zot.
+
+### Bugfixes and performance improvements
+
+Under some configurations, zot consumes significant CPU and memory resources. This has been fixed in this release.
+</Update>
+
+<Update label="v2.0.0" description="2023-12-16" tags={["Upgrade impact"]}>
+### Updated OCI support
+
+- Support is added for [OCI Distribution Spec v1.1.0-rc3](https://github.com/opencontainers/distribution-spec/releases/tag/v1.1.0-rc3) and [OCI Image Spec v1.1.0-rc4](https://github.com/opencontainers/image-spec/releases/tag/v1.1.0-rc4). The OCI changes are summarized [here](https://opencontainers.org/posts/blog/2023-07-07-summary-of-upcoming-changes-in-oci-image-and-distribution-specs-v-1-1/).  These specifications allow arbitrary artifact types and references so that software supply chain use cases can be supported (SBOMs, signatures, etc). Currently, [`oras`](https://github.com/oras-project/oras) and [`regclient`](https://github.com/regclient/regclient) support this spec.
+
+- For a demonstration of an end-to-end OCI artifacts workflow, see [Software Provenance Workflow Using OCI Artifacts](/v2.1.x/guides/provenance-workflow).
+
+<Warning>
+  Support is deprecated for earlier OCI release candidates.
+</Warning>
+
+### Built-in UI support
+
+- Using the new zot [GUI](/v2.1.x/use/web-ui), you can browse a zot registry for container images and artifacts. The web interface provides the shell commands for downloading an image using popular third-party tools such as docker, podman, and skopeo.
+
+### Support for social logins
+
+- Support is added for [OpenID authentication](/v2.1.x/security/authentication) with GitHub, Google, and dex.
+
+### Group policies for authorization
+
+- When creating authorization policies, you can assign multiple users to a named group. A [group-specific authorization policy](/v2.1.x/security/authentication) can then be defined, specifying allowed access and actions for the group.
+
+    :pencil2:  &nbsp;**Configuration syntax change**: In the previous release, authorization policies were defined directly under the `accessControl` key in the zot configuration file.  With the new ability to create authorization groups, it becomes necessary to add a new `repositories` key below `accessControl`. Beginning with zot v2.0.0, the set of authorization policies are now defined under the `repositories` key.
+
+### Signature verification
+
+- The validity of an image's signature can be [verified](/v2.1.x/security/signatures) by zot. Users can upload public keys or certificates to zot.
+
+### LDAP credentials stored separately from configuration
+
+- The LDAP credentials are removed from zot's LDAP configuration and stored in a separate file. See zot's [LDAP documentation](/v2.1.x/security/authentication).
+
+<Warning>
+  This LDAP configuration change is incompatible with previous zot releases. When upgrading, you must reconfigure your LDAP credentials if you use LDAP.
+</Warning>
+
+### Storage deduplication on startup
+
+- [Deduplication](/v2.1.x/configuration/storage/overview), a storage space saving feature, now runs or reverts at startup depending on whether the feature is enabled or disabled. You can trigger deduplication by enabling it and then restarting zot.
+
+### Retention policies
+
+- To optimize image storage, you can configure [tag retention policies](/v2.1.x/operations/retention-gc) to remove images that are no longer needed.
+
+### CVE scanning support for image indexes
+
+- The `trivy` backend now supports vulnerability scanning of image indexes. Previously, only images were scanned.
+
+### Bookmarks
+
+- In the zot GUI, you can [bookmark](/v2.1.x/use/web-ui) an image so that it can be easily found later. Bookmarked images appear in search queries when the bookmarked option is enabled.
+
+### Ability to delete tags from the UI
+
+- You can delete image tags from the web UI.
+
+### Command line search
+
+- The [`zli search`](/v2.1.x/use/zli-reference#zli-search) command allows smart searching for a repository by its name or for an image by its repo:tag.
+
+### Search by digest
+
+- You can perform a global search for a digest (SHA hash) using either the UI or the CLI. This function is useful when an issue is found in a layer that is used by multiple images. In the UI Search box, for example, begin typing `sha256:` followed by a partial or complete digest value to see a dropdown list of images that contain the layer with the digest value.
+
+### GraphQL support for search
+
+- A [GraphQL backend server](/v2.1.x/use/search-graphql) within zot's registry search engine provides efficient and enhanced search capabilities. In addition to supporting direct GraphQL queries through the API, zot hosts the GraphQL Playground, which provides an interactive graphical environment for GraphQL queries.
+
+### Scheduling of background tasks
+
+- You can adjust the background scheduler based on your deployment requirements for tasks that are handled in the background, such as garbage collection.  See [Configuring zot](/v2.1.x/configuration/overview).
+
+### Performance profiling for troubleshooting
+
+- You can use zot's [built-in profiling tools](/v2.1.x/operations/profiling) to collect and analyze runtime performance data.
+
+### Binaries for FreeBSD
+
+- zot binary images are available for the [FreeBSD](https://www.freebsd.org/) operating system. Supported architectures are amd64 and arm64.
+
+    :pencil2:  &nbsp;zot container images for FreeBSD will be available in a future release.
+
+***
+</Update>
+
+<Update label="v1.4.3" description="2022-11-30">
+### Remote-only Storage Support
+
+- The two types of state (images and image metadata) can both now be on [remote storage](https://github.com/project-zot/zot/blob/v1.4.3/examples/config-all-remote.json) so that zot process lifecycle and its storage can be managed and scaled independently.
+
+### Digest Collision Detection During Image Deletion
+
+- When two or more image tags point to the same image digest and the image is deleted by digest causes data loss and dangling references. A new behavior-based [policy](https://github.com/project-zot/zot/blob/v1.4.3/examples/config-policy.json) called _detectManifestCollision_ was added to prevent this.
+</Update>

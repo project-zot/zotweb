@@ -1,0 +1,185 @@
+---
+title: "Mutual TLS"
+description: "Authenticate clients with TLS certificates and map certificate attributes to zot identities."
+icon: "certificate"
+---
+
+zot supports standard TLS and password-less mutual TLS (mTLS). With mTLS, the server verifies a client certificate instead of a password, and zot derives the client's identity from the certificate.
+
+## Enable mTLS
+
+Setting `cacert` in `http.tls` makes zot require and verify client certificates against that CA. Then add an `auth.mtls` section to control how zot extracts the identity.
+
+```json
+"http": {
+  "address": "0.0.0.0",
+  "port": "8080",
+  "realm": "zot",
+  "tls": {
+    "cert": "/etc/zot/certs/server.cert",
+    "key": "/etc/zot/certs/server.key",
+    "cacert": "/etc/zot/certs/ca.cert"
+  },
+  "auth": {
+    "mtls": {
+      "identityAttributes": ["CommonName"]
+    }
+  }
+}
+```
+
+<ParamField path="http.tls.cert" type="string" required>
+  Path to the server's TLS certificate.
+</ParamField>
+<ParamField path="http.tls.key" type="string" required>
+  Path to the server's private key.
+</ParamField>
+<ParamField path="http.tls.cacert" type="string" required>
+  Path to the file with trusted certificate authority (CA) certificates. zot uses it to validate client certificates. Setting it enables mTLS.
+</ParamField>
+
+<Warning>
+  The `tls` block belongs under `http`, not under `http.auth`. A previous version of this documentation showed it under `auth`, which doesn't match the configuration schema. If you set `http.auth.mtls` without `http.tls.cacert`, zot fails validation with "mTLS configuration requires TLS to be enabled with CA certificate".
+</Warning>
+
+## Identity extraction
+
+By default, zot takes the client identity from the certificate's Common Name (`CN`). You can extract it from other attributes with a fallback chain.
+
+```json
+"http": {
+  "auth": {
+    "mtls": {
+      "identityAttributes": ["URI", "CommonName"],
+      "uriSanPattern": "spiffe://example.org/workload/(.*)",
+      "uriSanIndex": 0,
+      "dnsSanIndex": 0,
+      "emailSanIndex": 0
+    }
+  }
+}
+```
+
+<ParamField path="http.auth.mtls.identityAttributes" type="string[]" default='["CommonName"]'>
+  An ordered list of certificate attributes to try. If the first attribute is empty or doesn't match, zot tries the next one. Names are case-insensitive.
+</ParamField>
+<ParamField path="http.auth.mtls.uriSanPattern" type="string">
+  A regular expression with a capture group that extracts the identity from the URI SAN. Used only with `URI`. If unset, zot uses the full URI.
+</ParamField>
+<ParamField path="http.auth.mtls.uriSanIndex" type="integer" default="0">
+  Which URI SAN to use when the certificate has several (0-based, maps to `cert.URIs[index]`).
+</ParamField>
+<ParamField path="http.auth.mtls.dnsSanIndex" type="integer" default="0">
+  Which DNS SAN to use (0-based, maps to `cert.DNSNames[index]`).
+</ParamField>
+<ParamField path="http.auth.mtls.emailSanIndex" type="integer" default="0">
+  Which email SAN to use (0-based, maps to `cert.EmailAddresses[index]`).
+</ParamField>
+
+### Supported identity attributes
+
+| Attribute | Aliases | Identity taken from |
+|---|---|---|
+| `CommonName` | `CN` | The certificate's Common Name |
+| `Subject` | `DN` | The full Subject Distinguished Name |
+| `Email` | `rfc822name` | The email Subject Alternative Name (SAN) |
+| `URI` | `URL` | The URI SAN |
+| `DNSName` | `DNS` | The DNS SAN |
+
+### SPIFFE and URI patterns
+
+With `URI`, a pattern pulls a specific part out of the URI. For SPIFFE workload identity:
+
+- Certificate URI SAN: `spiffe://example.org/workload/testuser`
+- Pattern: `spiffe://example.org/workload/(.*)`
+- Extracted identity: `testuser`
+
+## Examples
+
+<Tabs>
+  <Tab title="Common Name">
+    The simplest setup uses the Common Name:
+
+    ```json
+    {
+      "http": {
+        "tls": {
+          "cert": "/etc/zot/certs/server.cert",
+          "key": "/etc/zot/certs/server.key",
+          "cacert": "/etc/zot/certs/ca.crt"
+        },
+        "auth": {
+          "mtls": {
+            "identityAttributes": ["CommonName"]
+          }
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="SPIFFE">
+    zot first tries the URI SAN with the pattern. If the URI SAN is missing or doesn't match, it falls back to the Common Name.
+
+    ```json
+    {
+      "http": {
+        "tls": {
+          "cert": "/etc/zot/certs/server.cert",
+          "key": "/etc/zot/certs/server.key",
+          "cacert": "/etc/zot/certs/ca.crt"
+        },
+        "auth": {
+          "mtls": {
+            "identityAttributes": ["URI", "CommonName"],
+            "uriSanPattern": "spiffe://example.org/workload/(.*)"
+          }
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Indexed SANs">
+    If a certificate has several email addresses and you want the second one:
+
+    ```json
+    {
+      "http": {
+        "auth": {
+          "mtls": {
+            "identityAttributes": ["Email", "CommonName"],
+            "emailSanIndex": 1
+          }
+        }
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Authorize the identity
+
+mTLS establishes who the client is. Use [access control](/v2.1.x/security/access-control) policies to grant that identity access, for example:
+
+```json
+"accessControl": {
+  "repositories": {
+    "**": {
+      "policies": [
+        {
+          "users": ["clientuser"],
+          "actions": ["read", "create"]
+        }
+      ],
+      "defaultPolicy": ["read"]
+    }
+  }
+}
+```
+
+## Combine mTLS with other methods
+
+mTLS can coexist with htpasswd, LDAP, OpenID, and the other methods. zot validates a presented client certificate first. The [request priority](/v2.1.x/security/authentication#request-priority) then decides which method establishes the identity.
+
+<Note>
+  The `mtls` settings can be changed on a running registry. zot reloads them when the configuration file changes.
+</Note>

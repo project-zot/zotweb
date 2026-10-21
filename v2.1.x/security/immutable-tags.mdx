@@ -1,0 +1,55 @@
+---
+title: "Immutable tags"
+description: "Prevent tags from being overwritten by using authorization policies."
+icon: "lock"
+---
+
+Once you release a software version, avoid changing its content. zot has no dedicated setting that makes tags immutable. You get the same effect with [access control](/v2.1.x/security/access-control) policies.
+
+A tag is immutable when users can `create` (push a new tag) but can't `update` (overwrite an existing tag).
+
+## Immutable for all users
+
+Set `defaultPolicy` to `read` and `create` for a repository. Users can push an image once and pull it, and further updates to the same tag are rejected.
+
+```json
+{
+  "http": {
+    "accessControl": {
+      "repositories": {
+        "**": {
+          "defaultPolicy": ["read", "create"]
+        }
+      }
+    }
+  }
+}
+```
+
+## Immutable with exceptions
+
+Add user-specific policies that grant `update` to the users who may overwrite tags. Everyone else stays on the immutable default.
+
+```json
+{
+  "http": {
+    "accessControl": {
+      "repositories": {
+        "**": {
+          "policies": [
+            {
+              "users": ["alice", "bob"],
+              "actions": ["read", "create", "update"]
+            }
+          ],
+          "defaultPolicy": ["read", "create"]
+        }
+      }
+    }
+  }
+}
+```
+
+<Note>
+  This relies on authentication being enabled. See [Authentication](/v2.1.x/security/authentication) and [Access control](/v2.1.x/security/access-control).
+</Note>

@@ -1,0 +1,85 @@
+---
+title: "Run with Docker"
+description: "Run the zot registry server in a Docker or Podman container."
+icon: "docker"
+---
+
+The zot project publishes container images to GitHub Container Registry. They're multi-architecture, so Docker and Podman pull the right one for your platform automatically.
+
+<Note>
+  This page is about running the zot **server** in a container. To configure the Docker **client** to push to and pull from zot, see [Docker client](/v2.1.x/clients/docker).
+</Note>
+
+## Run zot
+
+<CodeGroup>
+  ```bash Docker
+  docker run -d --name zot -p 5000:5000 ghcr.io/project-zot/zot:latest
+  ```
+
+  ```bash Podman
+  podman run -d --name zot -p 5000:5000 ghcr.io/project-zot/zot:latest
+  ```
+</CodeGroup>
+
+This starts a registry at `http://localhost:5000`. Authentication is disabled by default.
+
+## Persist data and use your own configuration
+
+Mount a directory for registry data. To override the default configuration, mount your own file over `/etc/zot/config.json`.
+
+```bash
+docker run -d --name zot -p 5000:5000 \
+  -v $(pwd)/registry:/var/lib/registry \
+  -v $(pwd)/config.json:/etc/zot/config.json \
+  ghcr.io/project-zot/zot:latest
+```
+
+## Published images
+
+All images support `linux/amd64`, `linux/arm64`, `freebsd/amd64`, and `freebsd/arm64`. They're tagged with release versions (for example `v2.1.22`) and `latest`.
+
+| Image | Description |
+|---|---|
+| `ghcr.io/project-zot/zot` | Full image with all extensions built in |
+| `ghcr.io/project-zot/zot-minimal` | Minimal Distribution Specification image with no extensions |
+| `ghcr.io/project-zot/zxp` | Metrics exporter for the minimal image |
+| `ghcr.io/project-zot/zb` | Benchmarking tool |
+
+The full image's default configuration enables `search` (with CVE scanning) and `ui`. The management API and user preferences turn on automatically with them. Other extensions are built in but need configuration. See [Enable extensions](/v2.1.x/configuration/extensions) and [Releases and images](/v2.1.x/install/releases) for the default configuration of each image.
+
+## Build your own image
+
+Clone the repository, then choose a build method.
+
+<Tabs>
+  <Tab title="Docker">
+    Edit the [sample Dockerfile](https://github.com/project-zot/zot/tree/main/build/Dockerfile) if needed, then build for your platform. The image is tagged `zot-<os>-<arch>:latest`.
+
+    ```bash
+    git clone https://github.com/project-zot/zot.git
+    cd zot
+    make OS=linux ARCH=amd64 docker-image
+    docker run --rm -it -p 5000:5000 -v $(pwd)/registry:/var/lib/registry zot-linux-amd64:latest
+    ```
+
+    The image has a basic default configuration at `/etc/zot/config.json` with no extensions enabled. Mount your own file to change it.
+  </Tab>
+  <Tab title="Stacker">
+    Build an OCI image from `build/stacker.yaml`. This is how the published images are built, and their default configuration enables `search` and `ui`.
+
+    ```bash
+    make OS=linux ARCH=amd64 oci-image
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+  To build only the binary, run `make OS=linux ARCH=amd64 binary` (full) or `binary-minimal`. You need a Go version at least as new as the one in `go.mod`. The binary is written to `bin/`.
+</Note>
+
+## Next steps
+
+- [Configure zot](/v2.1.x/configuration/overview)
+- [Set up the Docker client](/v2.1.x/clients/docker)
+- [Production checklist](/v2.1.x/operations/production-checklist)

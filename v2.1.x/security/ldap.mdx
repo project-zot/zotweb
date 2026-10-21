@@ -1,0 +1,135 @@
+---
+title: "LDAP"
+description: "Authenticate users against an LDAP directory such as Active Directory, and use LDAP groups in access control."
+icon: "address-book"
+---
+
+zot can authenticate users against an LDAP-based service such as Microsoft Active Directory (AD). Clients send HTTP Basic credentials. zot looks the user up in the directory and verifies the password.
+
+## Configure LDAP
+
+```json
+"http": {
+  "auth": {
+    "ldap": {
+      "credentialsFile": "/etc/zot/ldap-credentials.json",
+      "address": "ldap.example.org",
+      "port": 389,
+      "startTLS": false,
+      "baseDN": "ou=Users,dc=example,dc=org",
+      "userAttribute": "uid",
+      "userFilter": "(!(nsaccountlock=TRUE))",
+      "userGroupAttribute": "memberOf",
+      "skipVerify": false,
+      "subtreeSearch": true
+    }
+  }
+}
+```
+
+<ParamField path="address" type="string" required>
+  IP address or hostname of the LDAP server.
+</ParamField>
+<ParamField path="port" type="integer">
+  Port of the LDAP service.
+</ParamField>
+<ParamField path="baseDN" type="string" required>
+  Location in the directory where user searches start.
+</ParamField>
+<ParamField path="userAttribute" type="string" required>
+  Attribute that holds the username, for example `uid` or `sAMAccountName`.
+</ParamField>
+<ParamField path="userFilter" type="string">
+  An extra LDAP filter applied in addition to `userAttribute`, for example `(!(nsaccountlock=TRUE))` to skip locked accounts.
+</ParamField>
+<ParamField path="userGroupAttribute" type="string">
+  Attribute that lists the groups a user belongs to, for example `memberOf`. zot reads it so you can use LDAP groups in [access control](/v2.1.x/security/access-control).
+</ParamField>
+<ParamField path="subtreeSearch" type="boolean">
+  Set to `true` to search subtrees of `baseDN` as well.
+</ParamField>
+<ParamField path="credentialsFile" type="string">
+  Path to a file with the bind credentials. See [Bind credentials](#bind-credentials).
+</ParamField>
+
+`address`, `baseDN`, and `userAttribute` are mandatory. zot fails validation at startup if any is missing.
+
+### Connection security
+
+By default, zot connects to the directory over TLS from the start (LDAPS). Use these settings to change that:
+
+<ParamField path="insecure" type="boolean" default="false">
+  When `false`, zot connects with LDAPS (TLS from the start). When `true`, zot opens a plain TCP connection.
+</ParamField>
+<ParamField path="startTLS" type="boolean" default="false">
+  Only used when `insecure` is `true`. Set it to `true` to upgrade the plain connection with StartTLS. If `insecure` is `true` and `startTLS` is `false`, the connection isn't encrypted at all.
+</ParamField>
+<ParamField path="cacert" type="string">
+  Path to a PEM file with the CA certificate(s) that verify the LDAP server's certificate.
+</ParamField>
+<ParamField path="skipVerify" type="boolean" default="false">
+  Skip verification of the server's TLS certificate. Use only for testing.
+</ParamField>
+
+<Warning>
+  Don't send bind credentials or user passwords over an unencrypted LDAP connection. Keep `insecure` at `false`, or use `insecure: true` with `startTLS: true`, and verify the server certificate with `cacert`.
+</Warning>
+
+<Note>
+  Earlier documentation described `startTLS` as the switch that enables TLS. In the implementation, TLS is on by default (`insecure: false`), and `startTLS` selects StartTLS only on a connection you've marked `insecure`.
+</Note>
+
+## Bind credentials
+
+To separate configuration from credentials, store the bind credentials of the search account in a separate file that you can protect with stricter permissions, or mount from a Kubernetes Secret.
+
+```json /etc/zot/ldap-credentials.json
+{
+  "bindDN": "cn=ldap-searcher,ou=Users,dc=example,dc=org",
+  "bindPassword": "<bind-password>"
+}
+```
+
+<ParamField path="bindDN" type="string">
+  Distinguished name of the account that zot binds as to search for users.
+</ParamField>
+<ParamField path="bindPassword" type="string">
+  Password of the bind account. If you leave it empty, zot performs an unauthenticated bind.
+</ParamField>
+
+<Warning>
+  Make the credentials file readable only by the zot user.
+</Warning>
+
+## Use LDAP groups in access control
+
+When `userGroupAttribute` is set, zot adds the user's LDAP groups to their identity. Reference them in `groups` in an [access control](/v2.1.x/security/access-control) policy. **Use the group's full distinguished name:**
+
+```json
+"accessControl": {
+  "repositories": {
+    "**": {
+      "policies": [
+        {
+          "groups": ["cn=ldap-group,ou=Groups,dc=example,dc=org"],
+          "actions": ["read", "create", "update"]
+        }
+      ]
+    }
+  }
+}
+```
+
+## Combine LDAP with htpasswd
+
+You can configure both LDAP and [htpasswd](/v2.1.x/security/authentication#htpasswd). zot checks `htpasswd` first because it's local, then tries LDAP. A credential accepted by either backend authenticates the user, so a local account keeps working if the LDAP server is unreachable.
+
+## Changes without a restart
+
+zot reloads LDAP settings when you change the configuration file. Restart zot if you change the CA certificate file path.
+
+## Related
+
+- [Authentication overview](/v2.1.x/security/authentication)
+- [Access control](/v2.1.x/security/access-control)
+- [Docker client](/v2.1.x/clients/docker)

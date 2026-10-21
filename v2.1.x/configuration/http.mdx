@@ -1,0 +1,169 @@
+---
+title: "HTTP and TLS"
+description: "Configure the listener address and port, TLS, Docker compatibility, timeouts, CORS, and rate limiting."
+icon: "globe"
+---
+
+The `http` section controls how clients reach zot. Authentication and authorization live under `http.auth` and `http.accessControl`. They have their own pages: [Authentication](/v2.1.x/security/authentication) and [Access control](/v2.1.x/security/access-control).
+
+```json
+"http": {
+  "address": "0.0.0.0",
+  "port": "5000",
+  "realm": "zot",
+  "tls": {
+    "cert": "/etc/zot/certs/server.crt",
+    "key": "/etc/zot/certs/server.key"
+  }
+}
+```
+
+## Listener and network
+
+<ParamField path="http.address" type="string" default="127.0.0.1">
+  The IP address zot listens on. Use `0.0.0.0` to listen on all interfaces.
+</ParamField>
+
+<ParamField path="http.port" type="string" default="8080">
+  The port zot listens on, as a string. Must be between 0 and 65535.
+</ParamField>
+
+<ParamField path="http.realm" type="string">
+  The security policy domain that zot sends in the `WWW-Authenticate` challenge for basic authentication.
+</ParamField>
+
+<ParamField path="http.externalUrl" type="string">
+  The public URL clients use to reach zot, for example `https://registry.example.com`. zot uses it as the origin for OpenID redirect URIs and allows redirects back to it. Set it when zot runs behind a proxy or load balancer. See [OpenID Connect](/v2.1.x/security/openid).
+</ParamField>
+
+<ParamField path="http.allowOrigin" type="string">
+  A comma-separated list of origins allowed for cross-origin (CORS) requests, for example when you host the web UI on another origin.
+</ParamField>
+
+<ParamField path="http.readTimeout" type="duration" default="60s">
+  Maximum time to read an entire request, including the body. A value of `0` or less means no timeout.
+</ParamField>
+
+<ParamField path="http.writeTimeout" type="duration" default="60s">
+  Maximum time before a response write times out. A value of `0` or less means no timeout.
+</ParamField>
+
+<Note>
+  Large image uploads and downloads on slow links can exceed the default timeouts. Raise `readTimeout` and `writeTimeout`, or set them to `0` to disable them, if you see interrupted transfers.
+</Note>
+
+## TLS
+
+Add a `tls` object to serve HTTPS. When TLS is configured, zot requires at least TLS 1.2.
+
+<ParamField path="http.tls.cert" type="string" required>
+  Path to the server's TLS certificate (PEM).
+</ParamField>
+
+<ParamField path="http.tls.key" type="string" required>
+  Path to the server's private key (PEM).
+</ParamField>
+
+<ParamField path="http.tls.cacert" type="string">
+  Path to a CA certificate (PEM) used to verify client certificates. Setting it enables [mutual TLS](/v2.1.x/security/mtls). Clients that present no certificate are treated as anonymous, and you control what they can do with [access control](/v2.1.x/security/access-control) policies.
+</ParamField>
+
+<Info>
+  zot watches the certificate and key files and reloads them when they change, so you can renew a certificate without a restart. Changing the file paths, or changing `cacert`, needs a restart.
+</Info>
+
+When TLS is on, zot adds `Strict-Transport-Security: max-age=63072000; includeSubDomains` to every HTTPS response.
+
+<Warning>
+  The HSTS policy applies to all subdomains. Make sure every subdomain is HTTPS-ready before you serve zot from a parent domain.
+</Warning>
+
+For production, use a certificate from a public certificate authority such as [Let's Encrypt](https://letsencrypt.org/) or from your organization's CA. To serve a privileged port such as `443` without running as root, see [systemd socket activation](/v2.1.x/install/linux#systemd-socket-activation).
+
+## Docker image format compatibility
+
+By default, zot stores images in the OCI format and rejects Docker-format manifests (`application/vnd.docker.distribution.manifest.v2+json`) on push. Enable `http.compat` to accept them.
+
+<ParamField path="http.compat" type="array of string">
+  Media-type compatibility modes. The only supported value is the exact string `docker2s2`, which enables [Docker Image Manifest v2, Schema 2](https://distribution.github.io/distribution/spec/manifest-v2-2/). Aliases such as `docker` aren't accepted.
+</ParamField>
+
+```json
+"http": {
+  "address": "127.0.0.1",
+  "port": "8080",
+  "compat": ["docker2s2"]
+}
+```
+
+With `docker2s2`, zot stores a Docker image without changing its manifest or digest. Changing the manifest would otherwise break the image's signature and attestations.
+
+Enable `compat` when:
+
+- Clients push Docker schema 2 manifests directly to zot.
+- You mirror Docker-format images from upstream registries.
+- Mirrored Docker-format images have cosign or notation signatures and referrers tied to their Docker manifest digests.
+
+You can omit it when all pushed and synced content is OCI-formatted.
+
+<Note>
+  Beginning with v2.1.22, sync preserves upstream media types and digests, and it rejects Docker schema 2 content unless `http.compat` is set. The sync `preserveDigest` setting is deprecated and ignored.
+</Note>
+
+For a Docker Hub pull-through cache, combine `compat` with sync `onDemand: true`. See [Mirroring and sync](/v2.1.x/operations/mirroring) and the [Docker client](/v2.1.x/clients/docker) guide. The [examples](/v2.1.x/configuration/examples#docker-pull-through-cache) include a complete configuration.
+
+## Authentication failure delay
+
+Delay the response to a failed authentication attempt to slow down automated attacks:
+
+```json
+"http": {
+  "auth": {
+    "failDelay": 5
+  }
+}
+```
+
+<ParamField path="http.auth.failDelay" type="integer" default="0">
+  Seconds zot waits before it responds to a user who was denied access.
+</ParamField>
+
+## Rate limiting
+
+Limit the number of API calls per second from each client with the `ratelimit` object.
+
+```json
+"http": {
+  "address": "127.0.0.1",
+  "port": "8080",
+  "ratelimit": {
+    "rate": 10,
+    "methods": [
+      {
+        "method": "GET",
+        "rate": 5
+      }
+    ]
+  }
+}
+```
+
+<ParamField path="http.ratelimit.rate" type="integer">
+  A limit on requests per second from each client. Requests over the limit receive `429 Too Many Requests`.
+</ParamField>
+
+<ParamField path="http.ratelimit.methods" type="array of object">
+  Limits for specific HTTP methods. Each entry has a `method` (for example `GET`) and a `rate` in requests per second.
+</ParamField>
+
+In the example, zot allows each client ten API calls per second and limits `GET` calls to five per second.
+
+<Note>
+  zot identifies a client by its IP address. It checks the connection's remote address first, then the `X-Forwarded-For` and `X-Real-IP` headers. When all traffic arrives through a proxy or load balancer, clients can share one address and one limit. Account for that when you choose a rate.
+</Note>
+
+## Related
+
+- [Authentication](/v2.1.x/security/authentication) and [Access control](/v2.1.x/security/access-control)
+- [Security posture](/v2.1.x/security/posture) for build-time and runtime hardening
+- [Docker client](/v2.1.x/clients/docker) for HTTPS and compatibility settings from the client side

@@ -1,0 +1,204 @@
+---
+title: "Test deployments with kind"
+description: "Create a kind cluster with a local zot registry and deploy an image from it."
+icon: "flask"
+---
+
+[kind](https://kind.sigs.k8s.io/) runs Kubernetes clusters in Docker containers. This tutorial creates a `kind` cluster with a local zot registry at `localhost:5001`, then loads and runs a "hello" app from that registry.
+
+The steps below are also available as [one script](#complete-script). They follow the kind guide [Create a cluster and registry](https://kind.sigs.k8s.io/docs/user/local-registry/).
+
+## Prerequisites
+
+Install these tools:
+
+- `docker`
+- `kubectl`
+- `kind`
+- `skopeo`
+
+## Create the cluster and registry
+
+<Steps>
+  <Step title="Prepare the environment">
+    Stop on errors, and add the registry to `no_proxy` if you use a proxy:
+
+    ```shell
+    set -o errexit
+
+    # set no_proxy if applicable
+    if [ ! -z "${no_proxy}" ]; then
+      echo "Updating no_proxy environment variables";
+      export no_proxy=${no_proxy},kind-registry;
+      export NO_PROXY=${no_proxy};
+    fi
+    ```
+  </Step>
+
+  <Step title="Create a registry container">
+    Create a `kind-registry` container from the minimal zot image, unless it already exists:
+
+    ```shell
+    reg_name='kind-registry'
+    reg_port='5001'
+    if [ "$(docker inspect -f '{{.State.Running}}' "${reg_name}" 2>/dev/null || true)" != 'true' ]; then
+      docker run \
+        -d --restart=always -p "127.0.0.1:${reg_port}:5000" --name "${reg_name}" \
+        ghcr.io/project-zot/zot-minimal:latest
+    fi
+    ```
+
+    <Note>
+      This uses `zot-minimal:latest`, a minimal image with no extensions. The container runtime selects the right architecture for your platform. Other images include `zot:latest` (full-featured) and `zxp:latest` (metrics exporter). To pin a release, replace `latest` with a version tag from the [releases page](https://github.com/project-zot/zot/releases). See [Releases and images](/v2.1.x/install/releases).
+    </Note>
+  </Step>
+
+  <Step title="Create the kind cluster">
+    Create a cluster whose containerd mirrors `localhost:5001` to the registry container:
+
+    ```shell
+    cat <<EOF | kind create cluster --config=-
+    kind: Cluster
+    apiVersion: kind.x-k8s.io/v1alpha4
+    containerdConfigPatches:
+    - |-
+      [plugins."io.containerd.grpc.v1.cri".registry.mirrors."localhost:${reg_port}"]
+        endpoint = ["http://${reg_name}:5000"]
+    EOF
+    ```
+  </Step>
+
+  <Step title="Connect the registry to the cluster network">
+    Attach the registry to the `kind` Docker network so cluster nodes can reach it:
+
+    ```shell
+    if [ "$(docker inspect -f='{{json .NetworkSettings.Networks.kind}}' \
+    "${reg_name}")" = 'null' ]; then
+      docker network connect "kind" "${reg_name}"
+    fi
+    ```
+  </Step>
+
+  <Step title="Document the local registry">
+    Create a ConfigMap that tells tools how to reach the registry, following [KEP-1755](https://github.com/kubernetes/enhancements/tree/master/keps/sig-cluster-lifecycle/generic/1755-communicating-a-local-registry):
+
+    ```shell
+    cat <<EOF | kubectl apply -f -
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: local-registry-hosting
+      namespace: kube-public
+    data:
+      localRegistryHosting.v1: |
+        host: "localhost:${reg_port}"
+        help: "https://kind.sigs.k8s.io/docs/user/local-registry/"
+    EOF
+    ```
+  </Step>
+
+  <Step title="Deploy and test">
+    Copy a "hello" app into the new zot registry with skopeo, deploy it from there, and wait for it to become available:
+
+    ```shell
+    # copy an image
+    skopeo copy --format=oci --dest-tls-verify=false \
+      docker://gcr.io/google-samples/hello-app:1.0 \
+      docker://localhost:5001/hello-app:1.0
+
+    # deploy the image
+    kubectl create deployment hello-server --image=localhost:5001/hello-app:1.0
+
+    # check for availability
+    echo "Waiting for deployment/hello-server to be ready ..."
+    kubectl wait deployment -n default hello-server \
+      --for condition=Available=True --timeout=90s
+    ```
+  </Step>
+</Steps>
+
+## Clean up
+
+```shell
+kind delete cluster
+docker stop kind-registry
+docker rm kind-registry
+```
+
+<a id="complete-script"></a>
+
+## Complete script
+
+<Accordion title="Show the entire script">
+  ```shell
+  #!/bin/sh
+  set -o errexit
+
+  # Reference: https://kind.sigs.k8s.io/docs/user/local-registry/
+
+  # set no_proxy if applicable
+  if [ ! -z "${no_proxy}" ]; then
+    echo "Updating no_proxy env var";
+    export no_proxy=${no_proxy},kind-registry;
+    export NO_PROXY=${no_proxy};
+  fi
+
+  # create registry container unless it already exists
+  reg_name='kind-registry'
+  reg_port='5001'
+  if [ "$(docker inspect -f '{{.State.Running}}' "${reg_name}" 2>/dev/null || true)" != 'true' ]; then
+    docker run \
+      -d --restart=always -p "127.0.0.1:${reg_port}:5000" --name "${reg_name}" \
+      ghcr.io/project-zot/zot-minimal:latest
+  fi
+
+  # create a cluster with the local registry enabled in containerd
+  cat <<EOF | kind create cluster --config=-
+  kind: Cluster
+  apiVersion: kind.x-k8s.io/v1alpha4
+  containerdConfigPatches:
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".registry.mirrors."localhost:${reg_port}"]
+      endpoint = ["http://${reg_name}:5000"]
+  EOF
+
+  # connect the registry to the cluster network if not already connected
+  if [ "$(docker inspect -f='{{json .NetworkSettings.Networks.kind}}' "${reg_name}")" = 'null' ]; then
+    docker network connect "kind" "${reg_name}"
+  fi
+
+  # document the local registry
+  cat <<EOF | kubectl apply -f -
+  apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: local-registry-hosting
+    namespace: kube-public
+  data:
+    localRegistryHosting.v1: |
+      host: "localhost:${reg_port}"
+      help: "https://kind.sigs.k8s.io/docs/user/local-registry/"
+  EOF
+
+  # copy an image
+  skopeo copy --format=oci --dest-tls-verify=false docker://gcr.io/google-samples/hello-app:1.0 docker://localhost:5001/hello-app:1.0
+
+  # deploy the image
+  kubectl create deployment hello-server --image=localhost:5001/hello-app:1.0
+
+  # check for availability
+  echo "Waiting for deployment/hello-server to be ready ..."
+  kubectl wait deployment -n default hello-server --for condition=Available=True --timeout=90s
+
+  # cleanup
+  echo "Press a key to begin cleanup ..."
+  read KEYPRESS
+  kind delete cluster
+  docker stop kind-registry
+  docker rm kind-registry
+  ```
+</Accordion>
+
+<Info>
+  The zot repository includes variants of this script in `examples/kind/` that its CI uses, including one for OIDC workload identity and one for on-demand sync.
+</Info>

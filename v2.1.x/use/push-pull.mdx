@@ -1,0 +1,241 @@
+---
+title: "Push and pull images"
+description: "Work with images, Helm charts, and OCI artifacts in zot using skopeo, regclient, crane, oras, and helm."
+icon: "arrow-right-arrow-left"
+---
+
+A zot registry stores images, Helm charts, and other OCI artifacts. The content type decides which client fits best.
+
+| Content | Clients shown here |
+|---|---|
+| OCI images | [skopeo](#skopeo), [regclient](#regclient) (`regctl`), [crane](#crane) |
+| OCI artifacts | [oras](#oras) |
+| Helm charts | [helm](#helm) |
+
+<Note>
+  The examples use a registry at `localhost:5000` with plain HTTP and no authentication, as in the [Quickstart](/v2.1.x/quickstart). For a registry with TLS or authentication, see the **Authentication and TLS** section for each client. zot also works with Kubernetes and cri-o through the default `docker://` transport. See [Client compatibility](/v2.1.x/clients/compatibility).
+</Note>
+
+## Common tasks at a glance
+
+| Task | skopeo | regctl | crane | oras |
+|---|---|---|---|---|
+| Copy or push an image | `copy` | `image copy` | `push`, `copy` | `push`, `cp` |
+| Pull an image | `copy` | `image copy` | `pull` | `pull` |
+| List repositories | | `repo ls` | `catalog` | `repo ls` |
+| List tags | `list-tags` | `tag ls` | `ls` | `repo tags` |
+| Get a digest | `inspect` | `image digest` | `digest` | `resolve` |
+| Delete a tag | `delete` | `tag delete` | `delete` | `manifest delete` |
+| List referrers | | `artifact list` | | `discover` |
+
+Run each tool's `--help` for the exact flags in your version.
+
+## skopeo
+
+[skopeo](https://github.com/containers/skopeo) performs operations on container images and repositories. See the [skopeo man page](https://github.com/containers/skopeo/blob/main/docs/skopeo.1.md) for details.
+
+<Tabs>
+  <Tab title="Push">
+    Push the latest `busybox` image, including all architectures, as an OCI image:
+
+    ```bash
+    skopeo --insecure-policy copy --dest-tls-verify=false --multi-arch=all \
+      --format=oci docker://busybox:latest \
+      docker://localhost:5000/busybox:latest
+    ```
+  </Tab>
+  <Tab title="Pull to a directory">
+    Pull the image into a local OCI layout directory (`/oci/images`):
+
+    ```bash
+    skopeo --insecure-policy copy --src-tls-verify=false --multi-arch=all \
+      docker://localhost:5000/busybox:latest \
+      oci:/oci/images:busybox:latest
+    ```
+  </Tab>
+  <Tab title="Copy to another registry">
+    Copy the image to a private registry on port 5001:
+
+    ```bash
+    skopeo --insecure-policy copy --src-tls-verify=false --multi-arch=all \
+      docker://localhost:5000/busybox:latest \
+      docker://localhost:5001/busybox:latest
+    ```
+  </Tab>
+</Tabs>
+
+**Authentication and TLS.** Verify TLS by setting these flags to `true`, which is the default when you omit `--*-tls-verify=false`:
+
+```text
+--src-tls-verify=true
+--dest-tls-verify=true
+```
+
+Pass credentials for the source or destination:
+
+```text
+--src-creds username:password
+--dest-creds username:password
+```
+
+## regclient
+
+[regclient](https://github.com/regclient/regclient) is a client library and a command line tool, `regctl`, for images and repositories. See the [regctl documentation](https://github.com/regclient/regclient/blob/main/docs/regctl.md).
+
+<Steps>
+  <Step title="Allow plain HTTP (local testing only)">
+    ```bash
+    regctl registry set --tls=disabled localhost:5000
+    ```
+
+    Skip this step if the registry uses TLS.
+  </Step>
+  <Step title="Push and pull">
+    Push Go 1.20 from a local OCI layout to a `tools` repository, then pull it back:
+
+    ```bash
+    regctl image copy ocidir://path/to/golang:1.20 localhost:5000/tools
+    regctl image copy localhost:5000/tools ocidir://path/to/golang:1.20
+    ```
+  </Step>
+  <Step title="List repositories and tags">
+    ```bash
+    regctl repo ls localhost:5000
+    regctl tag ls localhost:5000/tools
+    ```
+  </Step>
+  <Step title="Get and put a manifest">
+    ```bash
+    regctl manifest get localhost:5000/tools --format=raw-body
+    regctl manifest put localhost:5000/tools:1.0.0 \
+      --format oci --content-type application/vnd.oci.image.manifest.v1+json
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+  Manifest tags must follow the OCI Distribution Specification tag grammar. The first character is alphanumeric or an underscore. Later characters can also be a period or dash. The maximum length is 128 characters. A colon separates the repository from the tag, so it can't appear in the tag. Invalid tags return `400 MANIFEST_INVALID`.
+</Warning>
+
+## crane
+
+[crane](https://github.com/google/go-containerregistry/blob/main/cmd/crane/README.md) is a command line tool for container registries. See the [crane documentation](https://github.com/google/go-containerregistry/tree/main/cmd/crane/doc/crane.md).
+
+<CodeGroup>
+  ```bash Push
+  crane --insecure push \
+    oci/images/alpine:latest \
+    localhost:5000/alpine:latest
+  ```
+
+  ```bash Pull
+  crane --insecure pull \
+    --format oci \
+    localhost:5000/alpine:latest \
+    oci/images/alpine:latest
+  ```
+
+  ```bash Copy
+  crane --insecure copy \
+    alpine:latest \
+    localhost:5000/alpine:latest
+  ```
+
+  ```bash List tags
+  crane ls localhost:5000/alpine
+  ```
+
+  ```bash Get digest
+  crane digest localhost:5000/alpine:latest
+  ```
+</CodeGroup>
+
+**Authentication.** Log in once per session. `--insecure` is only for plain HTTP:
+
+```bash
+crane auth login -u myUsername localhost:5000
+```
+
+## oras
+
+[ORAS](https://oras.land) (OCI Registry As Storage) stores OCI artifacts in OCI registries. See the [ORAS CLI documentation](https://oras.land/docs/commands/use_oras_cli).
+
+<Steps>
+  <Step title="Push an artifact">
+    Push version 2 of an artifact with a config and a file:
+
+    ```bash
+    oras push --plain-http localhost:5000/hello-artifact:v2 \
+      --config config.json:application/vnd.acme.rocket.config.v1+json \
+      artifact.txt:text/plain -d -v
+    ```
+  </Step>
+  <Step title="Pull the artifact">
+    ```bash
+    oras pull --plain-http localhost:5000/hello-artifact:v2 -d -v
+    ```
+  </Step>
+  <Step title="Attach a reference">
+    Attach a signature file to the artifact, then show the referrers as a tree:
+
+    ```bash
+    echo '{"artifact": "localhost:5000/hello-artifact:v2", "signature": "pat hancock"}' > signature.json
+
+    oras attach --plain-http \
+      --artifact-type 'signature/example' \
+      localhost:5000/hello-artifact:v2 \
+      ./signature.json:application/json
+
+    oras discover --plain-http -o tree localhost:5000/hello-artifact:v2
+    ```
+  </Step>
+</Steps>
+
+**Authentication.** Log in at the start of a session, or pass credentials on the command:
+
+```bash
+oras login -u myUsername -p myPassword localhost:5000
+oras pull -u myUsername -p myPassword localhost:5000/hello-artifact:v2
+```
+
+See the [ORAS authentication documentation](https://oras.land/docs/how_to_guides/authentication) for interactive entry and other options.
+
+## helm
+
+[Helm](https://helm.sh/) can store and retrieve charts in OCI registries. See [Commands for working with registries](https://helm.sh/docs/topics/registries/).
+
+<CodeGroup>
+  ```bash Push
+  helm package path/to/helm-charts/charts/zot
+  helm push zot-1.2.3.tgz oci://localhost:5000/zot-chart
+  ```
+
+  ```bash Pull
+  helm pull oci://localhost:5000/zot-chart/zot --version 1.2.3
+  ```
+</CodeGroup>
+
+If your registry uses plain HTTP, add `--plain-http` to these commands (Helm 3.13 and later).
+
+**Authentication.** Log in at the start of a session. Helm prompts for the password:
+
+```bash
+helm registry login -u myUsername localhost:5000
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Docker client" icon="docker" href="/v2.1.x/clients/docker">
+    Configure TLS, login, and compatibility for `docker push` and `docker pull`.
+  </Card>
+  <Card title="Query with zli" icon="square-terminal" href="/v2.1.x/use/zli">
+    List images, CVEs, and referrers from the command line.
+  </Card>
+  <Card title="Authentication" icon="key" href="/v2.1.x/security/authentication">
+    Turn on authentication for your registry.
+  </Card>
+  <Card title="Verify signatures" icon="signature" href="/v2.1.x/security/signatures">
+    Sign images and attach signatures that zot can verify.
+  </Card>
+</CardGroup>

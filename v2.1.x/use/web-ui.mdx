@@ -1,0 +1,125 @@
+---
+title: "Web UI"
+description: "Browse and search a zot registry in your browser, inspect images, and copy pull commands."
+icon: "window-maximize"
+---
+
+With the web UI, you can browse a zot registry for container images and artifacts. It also gives you ready-to-copy commands for pulling an image with popular tools.
+
+<Info>
+  The web UI is the `ui` [extension](/v2.1.x/configuration/extensions#web-ui). It's included in the full zot build and needs the `search` extension. It isn't in the minimal build. The default container images enable both. Open `http://<registry-address>` in your browser.
+</Info>
+
+## Open the registry
+
+<Note>
+  Depending on the registry's security configuration, you might need to sign in first. See [Authentication](/v2.1.x/security/authentication).
+</Note>
+
+The home page shows a sampling of the most popular and most recently updated images. To see every image in the registry, click **View all** at the upper right. That opens the `/explore` page.
+
+<Frame caption="The home page lists popular and recently updated images.">
+  <img src="/images/web-ui-home.jpg" alt="zot web UI home page with a search box and sections for popular and recently updated images" style={{ maxWidth: "600px" }} />
+</Frame>
+
+<Tip>
+  Next to each image name, two icons show the vulnerability scan result and the signature status. See [Icons and their meanings](#icons-and-their-meanings).
+</Tip>
+
+## Find an image
+
+The `/explore` page has a search box, sorting options, and filters.
+
+- **Sort by** relevance, most recently updated, alphabetical, or most downloaded.
+- **Filter by** operating system, CPU architecture, and signed images.
+
+<Frame caption="The explore page with sorting and filters.">
+  <img src="/images/web-ui-explore.jpg" alt="The explore page: filters for operating system, architectures, and signed images on the left, and a sort menu set to Most downloaded above a list of image results" style={{ maxWidth: "600px" }} />
+</Frame>
+
+When you find the image you want, click its tile.
+
+<Frame>
+  <img src="/images/web-ui-image-tile.jpg" alt="An image tile showing the image name, vulnerability and signature icons, and summary details" style={{ maxWidth: "400px" }} />
+</Frame>
+
+## Inspect an image
+
+The **OVERVIEW** tab of an image shows a short description and details such as the repository URL, number of downloads, last published date, size, and license.
+
+Click **TAGS** to see the tag history. You can sort it, search for a tag, and expand a tag's digest, OS/arch, and size.
+
+<Frame caption="The TAGS tab lists the versions of an image.">
+  <img src="/images/web-ui-tags.jpg" alt="The TAGS tab of a repository showing Tags History with a sort menu, a tag search box, and a list of tags with push time, digest, OS/arch, and size" style={{ maxWidth: "600px" }} />
+</Frame>
+
+Click a tag to see its details, including its digest, and to get a command that pulls the image.
+
+<Frame caption="The details page for one tag.">
+  <img src="/images/web-ui-image-details.jpg" alt="Details page for the tag c3/debian/base-amd64:bullseye showing its digest, the Pull Image menu, tabs, a Layers list, and OS/arch, size, last published, and license" style={{ maxWidth: "600px" }} />
+</Frame>
+
+The tabs on this page show:
+
+| Tab | What it shows |
+|---|---|
+| **LAYERS** | The build command and digest for each layer |
+| **USES** | Images that this image is built on |
+| **USED BY** | Images that build on this image |
+| **VULNERABILITIES** | Known vulnerabilities, when [CVE scanning](/v2.1.x/security/cve-scanning) is enabled |
+
+In **LAYERS**, click **Details** to see an example build command and the layer digest.
+
+<Frame>
+  <img src="/images/web-ui-layer-details.jpg" alt="Expanded layer details showing a build command and a layer digest" style={{ maxWidth: "400px" }} />
+</Frame>
+
+## Pull an image
+
+Open a tag, then click the **Pull Image** drop-down to see the pull command. Docker, Podman, and skopeo are supported. Select a tool and click the copy icon next to the command to copy it.
+
+<Frame>
+  <img src="/images/web-ui-pull-image.jpg" alt="The Pull Image drop-down with Docker, Podman, and Skopeo tabs and a copy button next to a podman pull command" style={{ maxWidth: "260px" }} />
+</Frame>
+
+For example, with Podman:
+
+```bash
+podman pull localhost:5000/c3/debian/base-amd64:bullseye
+```
+
+Paste the command in your terminal to pull the image. For more about the tools, see [Push and pull images](/v2.1.x/use/push-pull).
+
+## Bookmark an image
+
+To find an image easily later, click the bookmark icon on its page. Bookmarked images appear in search results when you enable the **Bookmarked** filter.
+
+<Columns cols={2}>
+  <Frame caption="Before bookmarking">
+    <img src="/images/web-ui-bookmark-off-page.png" alt="Image page with an unselected bookmark icon" />
+  </Frame>
+  <Frame caption="After bookmarking">
+    <img src="/images/web-ui-bookmark-on-page.png" alt="Image page with a selected bookmark icon" />
+  </Frame>
+</Columns>
+
+<Note>
+  Bookmarks and stars are stored per user, so you must be signed in to use them. They come from the user preferences extension, which turns on when `search` and `ui` are enabled.
+</Note>
+
+## Icons and their meanings
+
+These icons appear next to image names.
+
+| Icon | Meaning |
+|---|---|
+| <img src="/images/icon-no-vulnerabilities.jpg" alt="No vulnerabilities icon" width="35" /> | The vulnerability scan found no vulnerabilities |
+| <img src="/images/icon-scan-failed.jpg" alt="Scan failed icon" width="35" /> | The vulnerability scan failed. See the severity icon on the **VULNERABILITIES** tab. |
+| <img src="/images/icon-severity-critical.jpg" alt="Critical severity icon" width="25" /> | Critical severity |
+| <img src="/images/icon-severity-high.jpg" alt="High severity icon" width="25" /> | High severity |
+| <img src="/images/icon-severity-medium.jpg" alt="Medium severity icon" width="25" /> | Medium severity |
+| <img src="/images/icon-severity-low.jpg" alt="Low severity icon" width="25" /> | Low severity |
+| <img src="/images/icon-signature-verified.jpg" alt="Verified signature icon" width="35" /> | The image signature is verified |
+| <img src="/images/icon-signature-unverified.jpg" alt="Unverified signature icon" width="35" /> | The image signature isn't verified |
+| <img src="/images/icon-bookmark-off.png" alt="Bookmark off icon" width="25" /> | You haven't bookmarked the image |
+| <img src="/images/icon-bookmark-on.png" alt="Bookmark on icon" width="25" /> | You bookmarked the image |

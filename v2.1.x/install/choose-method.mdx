@@ -1,0 +1,53 @@
+---
+title: "Choose an install method"
+description: "Pick the right way to run zot: container, Linux service, Kubernetes, or built from source."
+icon: "signs-post"
+---
+
+zot is a single binary, so you can run it in many ways. Use this page to pick one.
+
+<CardGroup cols={2}>
+  <Card title="Container (Docker or Podman)" icon="docker" href="/v2.1.x/install/docker">
+    **Best for** trying zot, local development, and small deployments. One command starts a registry.
+  </Card>
+  <Card title="Linux service (systemd)" icon="linux" href="/v2.1.x/install/linux">
+    **Best for** a dedicated server or VM. You control the binary, user, and service lifecycle.
+  </Card>
+  <Card title="Kubernetes with Helm" icon="dharmachakra" href="/v2.1.x/install/kubernetes-helm">
+    **Best for** running zot next to your cluster, with replicas and cluster-native operations.
+  </Card>
+  <Card title="Build from source" icon="code" href="/v2.1.x/install/releases#build-from-source">
+    **Best for** custom build flags or a customized minimal build.
+  </Card>
+</CardGroup>
+
+## Compare
+
+| | Container | Linux service | Kubernetes (Helm) |
+|---|---|---|---|
+| Setup time | Minutes | About 15 minutes | Minutes with an existing cluster |
+| Needs root | No | Only for install | No |
+| Upgrades | Pull a new image tag | Replace the binary and restart | `helm upgrade` |
+| Scaling | Manual | Manual | Replicas, plus [clustering](/v2.1.x/operations/clustering/overview) |
+| Good for production | With a persistent volume | Yes | Yes |
+
+## Full or minimal?
+
+Both flavors exist for every method. See [Releases and images](/v2.1.x/install/releases).
+
+- Choose **full** for search, the web UI, scanning, sync, and other [extensions](/v2.1.x/concepts/extensions). This is the default for most people.
+- Choose **minimal** when you want only the core Distribution Specification registry with the smallest attack surface, for example in an embedded product.
+
+## After you install
+
+<Steps>
+  <Step title="Configure zot">
+    Review the [configuration overview](/v2.1.x/configuration/overview) and pick a [storage backend](/v2.1.x/configuration/storage/overview).
+  </Step>
+  <Step title="Secure it">
+    Turn on TLS and [authentication](/v2.1.x/security/authentication).
+  </Step>
+  <Step title="Check readiness for production">
+    Work through the [production checklist](/v2.1.x/operations/production-checklist).
+  </Step>
+</Steps>

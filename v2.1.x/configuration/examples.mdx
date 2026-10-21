@@ -1,0 +1,651 @@
+---
+title: "Configuration examples"
+description: "Curated, ready-to-use zot configurations for common scenarios."
+icon: "copy"
+---
+
+These configurations come from the [examples](https://github.com/project-zot/zot/tree/main/examples) in the zot repository, trimmed for clarity. Each one passes `zot verify`. Copy one, adjust it, and verify your version before you start zot.
+
+<Warning>
+  The examples use placeholder paths from the zot repository, such as `test/data/server.cert`, `test/data/htpasswd`, and `/tmp/zot`. Replace them with real paths, certificates, and credentials before you use them. Don't use the sample keys, secrets, or passwords in production.
+</Warning>
+
+```bash
+zot verify config.json
+```
+
+You can combine settings from several examples. For every available key, see the [configuration overview](/v2.1.x/configuration/overview) and the pages it links to.
+
+
+## Basics
+
+### Minimal
+
+**When to use:** A single instance with local storage and no authentication. Good for development and a first test.
+
+```json config-minimal.json
+{
+  "distSpecVersion": "1.1.1",
+  "storage": {
+    "rootDirectory": "/tmp/zot"
+  },
+  "http": {
+    "address": "127.0.0.1",
+    "port": "8080"
+  },
+  "log": {
+    "level": "debug"
+  }
+}
+```
+
+**Learn more:** [Configuration overview](/v2.1.x/configuration/overview)
+
+### TLS
+
+**When to use:** Serve HTTPS with your own certificate. Required for the Docker client off `localhost`.
+
+```json config-tls.json
+{
+  "distSpecVersion": "1.1.1",
+  "storage": {
+    "rootDirectory": "/tmp/zot"
+  },
+  "http": {
+    "address": "127.0.0.1",
+    "port": "8080",
+    "realm": "zot",
+    "tls": {
+      "cert": "test/data/server.cert",
+      "key": "test/data/server.key"
+    }
+  },
+  "log": {
+    "level": "debug"
+  }
+}
+```
+
+**Learn more:** [HTTP and TLS](/v2.1.x/configuration/http)
+
+## Security
+
+### Local users and LDAP
+
+**When to use:** Authenticate users from an `htpasswd` file, an LDAP directory, or both. `failDelay` slows down brute-force attempts.
+
+```json config-example.json
+{
+  "distSpecVersion": "1.1.1",
+  "storage": {
+    "rootDirectory": "/tmp/zot",
+    "dedupe": true,
+    "hydrateBlobOnRead": false
+  },
+  "http": {
+    "address": "127.0.0.1",
+    "port": "8080",
+    "realm": "zot",
+    "tls": {
+      "cert": "test/data/server.cert",
+      "key": "test/data/server.key"
+    },
+    "auth": {
+      "ldap": {
+        "address": "ldap.example.org",
+        "port": 389,
+        "startTLS": false,
+        "baseDN": "ou=Users,dc=example,dc=org",
+        "userAttribute": "uid",
+        "credentialsFile": "examples/config-ldap-credentials.json",
+        "skipVerify": false,
+        "subtreeSearch": true
+      },
+      "htpasswd": {
+        "path": "test/data/htpasswd"
+      },
+      "failDelay": 5
+    }
+  },
+  "log": {
+    "level": "debug",
+    "output": "/tmp/zot.log",
+    "audit": "/tmp/zot-audit.log"
+  }
+}
+```
+
+<Note>
+  The LDAP bind credentials live in a separate `credentialsFile`, so you can give it stricter permissions.
+</Note>
+
+**Learn more:** [Authentication](/v2.1.x/security/authentication) and [LDAP](/v2.1.x/security/ldap)
+
+### Mutual TLS
+
+**When to use:** Authenticate clients by their TLS certificates. `cacert` is the CA that signs client certificates.
+
+```json config-mtls.json
+{
+  "distSpecVersion": "1.1.1",
+  "storage": {
+    "rootDirectory": "/tmp/zot"
+  },
+  "http": {
+    "address": "127.0.0.1",
+    "port": "8080",
+    "realm": "zot",
+    "tls": {
+      "cert": "test/data/server.cert",
+      "key": "test/data/server.key",
+      "cacert": "test/data/ca.crt"
+    },
+    "auth": {
+      "mtls": {
+        "identityAttributes": ["CommonName"]
+      }
+    },
+    "accessControl": {
+      "repositories": {
+        "**": {
+          "policies": [
+            {
+              "users": ["clientuser"],
+              "actions": ["read", "create"]
+            }
+          ],
+          "defaultPolicy": ["read"]
+        }
+      }
+    }
+  },
+  "log": {
+    "level": "debug"
+  }
+}
+```
+
+**Learn more:** [Mutual TLS](/v2.1.x/security/mtls)
+
+### OpenID Connect and API keys
+
+**When to use:** Let users sign in with GitHub or a corporate identity provider. API keys let CLI tools and CI authenticate without a browser.
+
+```json config-openid.json
+{
+  "distSpecVersion": "1.1.1",
+  "storage": {
+    "rootDirectory": "/tmp/zot",
+    "dedupe": true
+  },
+  "http": {
+    "address": "127.0.0.1",
+    "port": "8080",
+    "externalUrl": "http://127.0.0.1:8080",
+    "realm": "zot",
+    "auth": {
+      "htpasswd": {
+        "path": "test/data/htpasswd"
+      },
+      "sessionKeysFile": "examples/sessionKeys.json",
+      "apikey": true,
+      "openid": {
+        "callbackAllowOrigins": ["http://127.0.0.1:3000"],
+        "providers": {
+          "github": {
+            "credentialsFile": "examples/config-openid-github-credentials.json",
+            "keypath": "",
+            "scopes": ["read:org", "user", "repo"]
+          },
+          "oidc": {
+            "name": "Corporate SSO",
+            "issuer": "http://127.0.0.1:5556/dex",
+            "credentialsFile": "examples/config-openid-oidc-credentials.json",
+            "scopes": ["openid", "user", "email", "groups"]
+          }
+        }
+      },
+      "failDelay": 5
+    },
+    "accessControl": {
+      "repositories": {
+        "**": {
+          "policies": [
+            {
+              "users": ["test"],
+              "actions": ["read", "create"]
+            }
+          ],
+          "defaultPolicy": ["read"]
+        }
+      }
+    }
+  },
+  "log": {
+    "level": "debug"
+  }
+}
+```
+
+<Note>
+  Set `externalUrl` to the URL users reach zot at. Each provider's client ID and secret live in its `credentialsFile`. zot also supports `google` and `gitlab` providers.
+</Note>
+
+**Learn more:** [OpenID Connect](/v2.1.x/security/openid) and [API keys](/v2.1.x/security/api-keys)
+
+### Access control with groups and conditions
+
+**When to use:** Give different users and groups different actions on different repository patterns.
+
+```json config-policy.json
+{
+  "distSpecVersion": "1.1.1",
+  "storage": {
+    "rootDirectory": "/tmp/zot"
+  },
+  "http": {
+    "auth": {
+      "htpasswd": {
+        "path": "test/data/htpasswd"
+      }
+    },
+    "accessControl": {
+      "groups": {
+        "group1": {
+          "users": ["jack", "john", "jane", "ana"]
+        },
+        "group2": {
+          "users": ["alice", "mike", "jim"]
+        }
+      },
+      "repositories": {
+        "**": {
+          "policies": [
+            {
+              "users": ["charlie"],
+              "groups": ["admins", "developers", "group1"],
+              "actions": ["read", "create", "update"]
+            },
+            {
+              "users": ["mary"],
+              "groups": ["group2"],
+              "actions": ["read", "create", "update", "delete"]
+            }
+          ],
+          "defaultPolicy": ["read", "create"]
+        },
+        "tmp/**": {
+          "defaultPolicy": ["read", "create", "update"]
+        },
+        "prod/**": {
+          "policies": [
+            {
+              "users": ["alice"],
+              "actions": ["read", "create", "update"],
+              "conditions": [
+                {
+                  "expression": "req.time < timestamp(\"2099-12-31T23:59:59Z\")",
+                  "message": "alice's prod access expires end of 2099"
+                },
+                {
+                  "expression": "req.referenceType == \"digest\"",
+                  "message": "prod pushes must use digest references, not mutable tags"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "adminPolicy": {
+        "users": ["admin"],
+        "groups": ["admins", "developers"],
+        "actions": ["read", "create", "update", "delete"]
+      }
+    }
+  },
+  "log": {
+    "level": "debug",
+    "output": "/tmp/zot.log"
+  }
+}
+```
+
+<Note>
+  The `prod/**` policy uses `conditions`, which are expressions that must all be true for the policy to apply.
+</Note>
+
+**Learn more:** [Access control](/v2.1.x/security/access-control)
+
+## Storage and data lifecycle
+
+### Amazon S3 storage
+
+**When to use:** Store images in S3 or an S3-compatible service. A DynamoDB cache supports deduplication across instances.
+
+```json config-s3.json
+{
+  "distSpecVersion": "1.1.1",
+  "storage": {
+    "rootDirectory": "/tmp/zot",
+    "dedupe": true,
+    "storageDriver": {
+      "name": "s3",
+      "rootdirectory": "/zot",
+      "region": "us-east-2",
+      "bucket": "zot-storage",
+      "forcepathstyle": true,
+      "secure": true,
+      "skipverify": false
+    },
+    "cacheDriver": {
+      "name": "dynamodb",
+      "endpoint": "http://localhost:4566",
+      "region": "us-east-2",
+      "cacheTablename": "MainTable"
+    }
+  },
+  "http": {
+    "address": "127.0.0.1",
+    "port": "8080"
+  },
+  "log": {
+    "level": "debug"
+  }
+}
+```
+
+<Note>
+  CVE scanning doesn't work with remote storage, so don't enable the `cve` option on this configuration.
+</Note>
+
+**Learn more:** [Amazon S3](/v2.1.x/configuration/storage/s3) and [Cache drivers](/v2.1.x/configuration/storage/cache-drivers)
+
+### Retention and garbage collection
+
+**When to use:** Automatically remove old or unused tags, and reclaim the space.
+
+```json config-retention.json
+{
+  "distSpecVersion": "1.1.1",
+  "storage": {
+    "rootDirectory": "/tmp/zot",
+    "gc": true,
+    "gcDelay": "2h",
+    "gcInterval": "1h",
+    "retention": {
+      "dryRun": false,
+      "delay": "24h",
+      "policies": [
+        {
+          "repositories": ["infra/*", "prod/*"],
+          "deleteReferrers": false,
+          "keepTags": [
+            {
+              "patterns": ["v2.*", ".*-prod"]
+            },
+            {
+              "patterns": ["v3.*", ".*-prod"],
+              "pulledWithin": "168h"
+            }
+          ]
+        },
+        {
+          "repositories": ["tmp/**"],
+          "deleteReferrers": true,
+          "deleteUntagged": true,
+          "keepTags": [
+            {
+              "patterns": ["v1.*"],
+              "pulledWithin": "168h",
+              "pushedWithin": "168h"
+            }
+          ],
+          "keepUntagged": {
+            "pulledWithin": "168h",
+            "pushedWithin": "168h"
+          }
+        },
+        {
+          "repositories": ["**"],
+          "deleteReferrers": true,
+          "deleteUntagged": true,
+          "keepTags": [
+            {
+              "mostRecentlyPushedCount": 10,
+              "mostRecentlyPulledCount": 10,
+              "pulledWithin": "720h",
+              "pushedWithin": "720h"
+            }
+          ],
+          "keepUntagged": {
+            "mostRecentlyPushedCount": 10,
+            "mostRecentlyPulledCount": 10,
+            "pulledWithin": "720h",
+            "pushedWithin": "720h"
+          }
+        }
+      ]
+    }
+  },
+  "http": {
+    "address": "127.0.0.1",
+    "port": "8080"
+  },
+  "log": {
+    "level": "debug"
+  }
+}
+```
+
+<Note>
+  Retention decides what to remove, and garbage collection frees the space. `delay` applies to referrers and untagged images.
+</Note>
+
+**Learn more:** [Retention and garbage collection](/v2.1.x/operations/retention-gc) and [Background tasks](/v2.1.x/configuration/background-tasks)
+
+## Features and extensions
+
+### Search, CVE scanning, and web UI
+
+**When to use:** Browse images in a web UI and scan them for vulnerabilities. Requires the full image and local storage.
+
+```json config-ui.json
+{
+  "distSpecVersion": "1.1.1",
+  "storage": {
+    "rootDirectory": "/tmp/zot"
+  },
+  "http": {
+    "address": "0.0.0.0",
+    "port": "8080"
+  },
+  "log": {
+    "level": "debug"
+  },
+  "extensions": {
+    "search": {
+      "cve": {
+        "updateInterval": "2h"
+      }
+    },
+    "ui": {
+      "enable": true
+    }
+  }
+}
+```
+
+<Note>
+  The `ui` extension requires `search`. The `cve` object turns on vulnerability scanning.
+</Note>
+
+**Learn more:** [Enable extensions](/v2.1.x/configuration/extensions), [Web UI](/v2.1.x/use/web-ui), and [CVE scanning](/v2.1.x/security/cve-scanning)
+
+### Docker pull-through cache
+
+**When to use:** Use zot as an on-demand mirror of Docker Hub. `compat` lets zot store Docker-format images unchanged.
+
+```json config-docker-compat-sync.json
+{
+  "distSpecVersion": "1.1.1",
+  "storage": {
+    "rootDirectory": "/tmp/zot"
+  },
+  "http": {
+    "address": "127.0.0.1",
+    "port": "8080",
+    "compat": ["docker2s2"]
+  },
+  "log": {
+    "level": "debug"
+  },
+  "extensions": {
+    "sync": {
+      "enable": true,
+      "credentialsFile": "./examples/sync-auth-filepath.json",
+      "registries": [
+        {
+          "urls": ["https://index.docker.io"],
+          "onDemand": true,
+          "tlsVerify": true,
+          "retryDelay": "5m",
+          "syncTimeout": "10m"
+        }
+      ]
+    }
+  }
+}
+```
+
+<Note>
+  The `credentialsFile` maps registry addresses to credentials. Remove the line if you pull anonymously.
+</Note>
+
+**Learn more:** [Mirroring and sync](/v2.1.x/operations/mirroring) and [Docker client](/v2.1.x/clients/docker)
+
+### Prometheus metrics
+
+**When to use:** Expose metrics for Prometheus to scrape.
+
+```json config-metrics.json
+{
+  "distSpecVersion": "1.1.1",
+  "storage": {
+    "rootDirectory": "/tmp/zot"
+  },
+  "http": {
+    "address": "127.0.0.1",
+    "port": "8080"
+  },
+  "log": {
+    "level": "debug"
+  },
+  "extensions": {
+    "metrics": {
+      "enable": true,
+      "prometheus": {
+        "path": "/metrics"
+      }
+    }
+  }
+}
+```
+
+**Learn more:** [Monitoring](/v2.1.x/operations/monitoring)
+
+### Events
+
+**When to use:** Publish registry events to NATS or an HTTP webhook.
+
+```json config-events.json
+{
+  "distSpecVersion": "1.1.1",
+  "storage": {
+    "rootDirectory": "/tmp/zot"
+  },
+  "http": {
+    "address": "127.0.0.1",
+    "port": "8080"
+  },
+  "log": {
+    "level": "debug"
+  },
+  "extensions": {
+    "events": {
+      "enable": true,
+      "source": "registry.example.com/tenant-a",
+      "typePrefix": "com.example.registry",
+      "sinks": [
+        {
+          "type": "nats",
+          "address": "nats://127.0.0.1:4222",
+          "timeout": "10s",
+          "channel": "alerts"
+        }
+      ]
+    }
+  }
+}
+```
+
+**Learn more:** [Events](/v2.1.x/operations/events)
+
+## Clustering
+
+### Scale-out cluster member
+
+**When to use:** One of several zot instances that share S3 storage and a DynamoDB cache behind a load balancer. Every member uses the same `cluster` settings.
+
+```json config-cluster-member0.json
+{
+  "distSpecVersion": "1.1.1",
+  "storage": {
+    "rootDirectory": "/tmp/zot",
+    "dedupe": false,
+    "remoteCache": true,
+    "storageDriver": {
+      "name": "s3",
+      "rootdirectory": "/zot",
+      "region": "us-east-1",
+      "regionendpoint": "localhost:4566",
+      "bucket": "zot-storage",
+      "forcepathstyle": true,
+      "secure": false,
+      "skipverify": false
+    },
+    "cacheDriver": {
+      "name": "dynamodb",
+      "endpoint": "http://localhost:4566",
+      "region": "us-east-1",
+      "cacheTablename": "ZotBlobTable",
+      "repoMetaTablename": "ZotRepoMetadataTable",
+      "imageMetaTablename": "ZotImageMetaTable",
+      "repoBlobsInfoTablename": "ZotRepoBlobsInfoTable",
+      "userDataTablename": "ZotUserDataTable",
+      "versionTablename": "ZotVersion",
+      "apiKeyTablename": "ZotApiKeyTable"
+    }
+  },
+  "http": {
+    "address": "127.0.0.1",
+    "port": "9000"
+  },
+  "log": {
+    "level": "debug"
+  },
+  "cluster": {
+    "members": ["127.0.0.1:9000", "127.0.0.1:9001", "127.0.0.1:9002"],
+    "hashKey": "loremipsumdolors"
+  }
+}
+```
+
+<Note>
+  List every member in `cluster.members`, and give all members the same `hashKey`, which must be exactly 16 bytes. Change `http.port` for each member.
+</Note>
+
+**Learn more:** [Scale-out clustering](/v2.1.x/operations/clustering/scale-out)
+
+## More examples
+
+The zot repository has more than 60 example files, including every sync credential helper, Redis and DynamoDB caches, GCS and Azure storage, user namespaces, and a bearer-token flow with AWS Secrets Manager. Browse them in the [examples directory](https://github.com/project-zot/zot/tree/main/examples) and the [examples README](https://github.com/project-zot/zot/blob/main/examples/README.md).

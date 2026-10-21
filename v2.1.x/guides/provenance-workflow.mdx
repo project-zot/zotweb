@@ -1,0 +1,186 @@
+---
+title: "Software provenance workflow"
+description: "Run zot, push an image and a related artifact such as an SBOM, sign both with cosign, and inspect the reference tree."
+icon: "stamp"
+---
+
+This tutorial shows an end-to-end provenance workflow with OCI artifacts. You run a zot registry, push an image, attach an artifact to it, sign both, and inspect the resulting reference tree.
+
+The OCI Distribution Specification calls an object that points at another object through a `subject` field a **referrer**. An SBOM or a signature is a referrer of the image it describes. zot serves them through the referrers API.
+
+## Prerequisites
+
+- Docker or Podman (to run zot)
+- [skopeo](https://github.com/containers/skopeo)
+- [regctl](https://github.com/regclient/regclient) from regclient, to push artifacts and print the reference tree
+- [cosign](https://github.com/sigstore/cosign), to sign
+- `jq` and `curl`
+
+## Run the workflow
+
+The examples assume zot runs at `localhost:8080`.
+
+<Steps>
+  <Step title="Start zot">
+    Run the minimal zot image, which supports referrers, and map it to port 8080. Wait until it answers:
+
+    ```shell
+    docker run -d --name zot-demo -p 8080:5000 ghcr.io/project-zot/zot-minimal:latest
+
+    until curl -sf http://localhost:8080/v2/ >/dev/null; do sleep 1; done
+    ```
+
+    Tell regctl that this registry doesn't use TLS:
+
+    ```shell
+    regctl registry set --tls=disabled localhost:8080
+    ```
+
+    <Note>
+      You can also [install a binary](/v2.1.x/install/linux) instead of using a container. The demo registry has no authentication, so use it for testing only.
+    </Note>
+  </Step>
+
+  <Step title="Copy an image to the registry">
+    Copy a `busybox` image into the registry:
+
+    ```shell
+    skopeo copy --format=oci --dest-tls-verify=false \
+      docker://busybox:latest docker://localhost:8080/busybox:latest
+    ```
+  </Step>
+
+  <Step title="Attach an artifact to the image">
+    Create a small artifact file and associate it with the image using `--subject`:
+
+    ```shell
+    cat > artifact.yaml << EOF
+    key:
+      val: artifact
+    EOF
+
+    regctl artifact put --artifact-type application/yaml -f artifact.yaml \
+      --subject localhost:8080/busybox:latest
+    ```
+
+    The `--subject` flag associates the artifact with the image. Without it, the artifact is independent and isn't associated with any image.
+  </Step>
+
+  <Step title="Show the reference tree">
+    Print the tree of objects that refer to the image:
+
+    ```shell
+    regctl artifact tree localhost:8080/busybox:latest
+    ```
+
+    The output shows the image with one direct referrer, the YAML artifact:
+
+    ```text
+    Ref: localhost:8080/busybox:latest
+    Digest: sha256:<image-digest>
+    Referrers:
+      - sha256:<artifact-digest>: application/yaml
+    ```
+
+    Capture the artifact's digest for the next step:
+
+    ```shell
+    REF0=$(regctl artifact tree --format '{{jsonPretty .}}' localhost:8080/busybox:latest \
+      | jq -r '.referrer[0].reference.Digest')
+    ```
+  </Step>
+
+  <Step title="Sign the image and the artifact">
+    Create a cosign key pair, then sign the image and the artifact. Both signatures are stored in the registry as referrers.
+
+    ```shell
+    COSIGN_PASSWORD= cosign generate-key-pair
+
+    # sign the image
+    COSIGN_PASSWORD= cosign sign -y --key cosign.key \
+      --new-bundle-format=true --registry-referrers-mode=oci-1-1 \
+      --allow-insecure-registry localhost:8080/busybox:latest
+
+    # sign the artifact that refers to the image
+    COSIGN_PASSWORD= cosign sign -y --key cosign.key \
+      --new-bundle-format=true --registry-referrers-mode=oci-1-1 \
+      --allow-insecure-registry localhost:8080/busybox@${REF0}
+    ```
+
+    <Warning>
+      An empty `COSIGN_PASSWORD` is for this demo only. Protect real signing keys with a password or use keyless signing, and store them securely.
+    </Warning>
+  </Step>
+
+  <Step title="Show the tree again">
+    ```shell
+    regctl artifact tree localhost:8080/busybox:latest
+    ```
+
+    The image now has two direct referrers: the artifact and the signature of the image. The artifact has a referrer of its own, the signature of the artifact:
+
+    ```text
+    Ref: localhost:8080/busybox:latest
+    Digest: sha256:<image-digest>
+    Referrers:
+      - sha256:<artifact-digest>: application/yaml
+        Referrers:
+          - sha256:<artifact-signature-digest>: <signature media type>
+      - sha256:<image-signature-digest>: <signature media type>
+    ```
+
+    The signature media type depends on your cosign version and signing format. With `--new-bundle-format=true`, it's a Sigstore bundle.
+  </Step>
+
+  <Step title="Clean up">
+    ```shell
+    docker rm -f zot-demo
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+  zot can verify cosign and notation signatures and report them through search. See [Verify image signatures](/v2.1.x/security/signatures).
+</Tip>
+
+## Complete script
+
+<Accordion title="Show the all-in-one script">
+  ```shell
+  #!/bin/bash -xe
+
+  # start zot (minimal image supports referrers)
+  docker run -d --name zot-demo -p 8080:5000 ghcr.io/project-zot/zot-minimal:latest
+  until curl -sf http://localhost:8080/v2/ >/dev/null; do sleep 1; done
+  regctl registry set --tls=disabled localhost:8080
+
+  # copy an image
+  skopeo copy --format=oci --dest-tls-verify=false \
+    docker://busybox:latest docker://localhost:8080/busybox:latest
+
+  # copy an artifact referring to the image
+  cat > artifact.yaml << EOF
+  key:
+    val: artifact
+  EOF
+  regctl artifact put --artifact-type application/yaml -f artifact.yaml \
+    --subject localhost:8080/busybox:latest
+  REF0=$(regctl artifact tree --format '{{jsonPretty .}}' localhost:8080/busybox:latest \
+    | jq -r '.referrer[0].reference.Digest')
+
+  # create a key pair and sign the image and the artifact
+  COSIGN_PASSWORD= cosign generate-key-pair
+  COSIGN_PASSWORD= cosign sign -y --key cosign.key \
+    --new-bundle-format=true --registry-referrers-mode=oci-1-1 \
+    --allow-insecure-registry localhost:8080/busybox:latest
+  COSIGN_PASSWORD= cosign sign -y --key cosign.key \
+    --new-bundle-format=true --registry-referrers-mode=oci-1-1 \
+    --allow-insecure-registry localhost:8080/busybox@${REF0}
+
+  # list the reference tree
+  regctl artifact tree localhost:8080/busybox:latest
+
+  # stop zot
+  docker rm -f zot-demo
+  ```
+</Accordion>
